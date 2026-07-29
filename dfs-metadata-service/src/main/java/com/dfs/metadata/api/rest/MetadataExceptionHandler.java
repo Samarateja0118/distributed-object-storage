@@ -5,6 +5,8 @@ import com.dfs.metadata.domain.exception.BucketNotEmptyException;
 import com.dfs.metadata.domain.exception.BucketNotFoundException;
 import com.dfs.metadata.domain.exception.MetadataValidationException;
 import com.dfs.metadata.domain.exception.ObjectNotFoundException;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -18,8 +20,14 @@ import java.util.Map;
 
 /**
  * Translates domain and persistence failures into RFC 7807 problem details.
+ *
+ * <p>Ordered ahead of Spring's own {@code ProblemDetailsExceptionHandler}, which
+ * {@code spring.mvc.problemdetails.enabled} registers at order 0. Without this,
+ * that handler would claim {@link MethodArgumentNotValidException} first and the
+ * per-field {@code errors} map below would never reach the client.
  */
 @RestControllerAdvice
+@Order(Ordered.HIGHEST_PRECEDENCE)
 class MetadataExceptionHandler {
 
     private static final String PROBLEM_BASE = "https://docs.dfs.local/problems/";

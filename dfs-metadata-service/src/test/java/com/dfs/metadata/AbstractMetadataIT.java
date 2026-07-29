@@ -9,8 +9,6 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.UUID;
 
@@ -21,12 +19,20 @@ import java.util.UUID;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Testcontainers
 abstract class AbstractMetadataIT {
 
-    @Container
+    /**
+     * Started once for the whole suite and never stopped: the JUnit
+     * {@code @Container} lifecycle would shut this down after the first subclass
+     * finishes, leaving later classes with a dead database. Ryuk reaps it when
+     * the JVM exits.
+     */
     @ServiceConnection
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+
+    static {
+        POSTGRES.start();
+    }
 
     @Autowired
     protected MockMvc mockMvc;
