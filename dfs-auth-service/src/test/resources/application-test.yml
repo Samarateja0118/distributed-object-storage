@@ -1,0 +1,21 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  mvc:
+    problemdetails:
+      enabled: true
+
+dfs:
+  auth:
+    api-key-cache-ttl: 5m
+    jwt:
+      issuer: dfs-auth-test
+      access-token-ttl: 15m
+      signing-secret: test-signing-secret-not-used-outside-tests
+
+logging:
+  level:
+    org.testcontainers: WARN
+    com.github.dockerjava: WARN
