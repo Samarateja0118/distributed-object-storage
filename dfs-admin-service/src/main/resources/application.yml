@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: dfs-admin-service
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:dfs}
+    username: ${POSTGRES_USER:dfs}
+    password: ${POSTGRES_PASSWORD:dfs}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: ${SERVER_PORT:8086}
+
+dfs:
+  service-name: admin
+  environment: ${DFS_ENV:local}
+  admin:
+    allow-node-registration: true
+    default-tenant-quota-bytes: 1099511627776
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+logging:
+  level:
+    root: INFO
+    com.dfs: DEBUG

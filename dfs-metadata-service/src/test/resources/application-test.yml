@@ -1,0 +1,17 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+# Redis and Kafka clients connect lazily, so their beans are left wired but
+# unused; Phase 1 metadata tests exercise PostgreSQL only.
+
+# The gRPC server is not exercised by Phase 1 metadata tests.
+grpc:
+  server:
+    port: -1
+
+logging:
+  level:
+    org.testcontainers: WARN
+    com.github.dockerjava: WARN

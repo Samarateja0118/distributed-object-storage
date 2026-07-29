@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package dfs.blob.v1;
+
+import "dfs/common/v1/common.proto";
+
+option java_multiple_files = true;
+option java_package = "com.dfs.proto.blob.v1";
+option java_outer_classname = "BlobProto";
+
+// Internal blob node contract (implementation deferred).
+service BlobNodeService {
+  rpc PutChunk(PutChunkRequest) returns (PutChunkResponse);
+  rpc GetChunk(GetChunkRequest) returns (GetChunkResponse);
+  rpc DeleteChunk(DeleteChunkRequest) returns (DeleteChunkResponse);
+}
+
+message PutChunkRequest {
+  string content_hash = 1;
+  bytes data = 2;
+}
+
+message PutChunkResponse {
+  dfs.common.v1.ChunkId chunk_id = 1;
+}
+
+message GetChunkRequest {
+  string content_hash = 1;
+}
+
+message GetChunkResponse {
+  bytes data = 1;
+}
+
+message DeleteChunkRequest {
+  string content_hash = 1;
+}
+
+message DeleteChunkResponse {}

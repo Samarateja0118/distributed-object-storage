@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package dfs.metadata.v1;
+
+import "dfs/common/v1/common.proto";
+
+option java_multiple_files = true;
+option java_package = "com.dfs.proto.metadata.v1";
+option java_outer_classname = "MetadataProto";
+
+// Internal metadata service contract (implementation deferred).
+service MetadataService {
+  rpc GetObjectMeta(GetObjectMetaRequest) returns (GetObjectMetaResponse);
+}
+
+message GetObjectMetaRequest {
+  dfs.common.v1.BucketId bucket_id = 1;
+  string object_key = 2;
+}
+
+message GetObjectMetaResponse {
+  dfs.common.v1.ObjectId object_id = 1;
+  int64 size_bytes = 2;
+  string content_type = 3;
+  string etag = 4;
+}

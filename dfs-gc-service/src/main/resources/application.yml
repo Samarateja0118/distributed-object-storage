@@ -1,0 +1,45 @@
+spring:
+  application:
+    name: dfs-gc-service
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:dfs}
+    username: ${POSTGRES_USER:dfs}
+    password: ${POSTGRES_PASSWORD:dfs}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: dfs-gc
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+server:
+  port: ${SERVER_PORT:8085}
+
+dfs:
+  service-name: gc
+  environment: ${DFS_ENV:local}
+  gc:
+    soft-delete-retention: 7d
+    orphan-chunk-grace-period: 24h
+    scan-interval: 1h
+    object-deleted-topic: dfs.object.deleted
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+logging:
+  level:
+    root: INFO
+    com.dfs: DEBUG

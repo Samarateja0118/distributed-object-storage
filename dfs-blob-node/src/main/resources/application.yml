@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: dfs-blob-node
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: ${SERVER_PORT:8090}
+
+grpc:
+  server:
+    port: ${GRPC_PORT:9090}
+
+dfs:
+  service-name: blob-node
+  environment: ${DFS_ENV:local}
+  blob:
+    node-id: ${BLOB_NODE_ID:blob-node-1}
+    storage-root-path: ${BLOB_STORAGE_PATH:./blob-data/node-1}
+    capacity-bytes: ${BLOB_CAPACITY_BYTES:107374182400}
+    rack: ${BLOB_RACK:rack-a}
+    zone: ${BLOB_ZONE:zone-1}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+logging:
+  level:
+    root: INFO
+    com.dfs: DEBUG

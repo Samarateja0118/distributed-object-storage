@@ -1,0 +1,43 @@
+spring:
+  application:
+    name: dfs-upload-orchestrator
+  threads:
+    virtual:
+      enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
+server:
+  port: ${SERVER_PORT:8083}
+
+dfs:
+  service-name: upload-orchestrator
+  environment: ${DFS_ENV:local}
+  upload:
+    chunk-size-mb: 8
+    max-concurrent-chunks: 8
+    multipart-session-ttl: 24h
+    metadata-grpc-target: static://localhost:9082
+    blob-grpc-target: static://localhost:9090
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+logging:
+  level:
+    root: INFO
+    com.dfs: DEBUG

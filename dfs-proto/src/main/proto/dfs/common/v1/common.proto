@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package dfs.common.v1;
+
+option java_multiple_files = true;
+option java_package = "com.dfs.proto.common.v1";
+option java_outer_classname = "CommonProto";
+
+// Shared identifiers exchanged across internal gRPC services.
+message TenantId {
+  string value = 1;
+}
+
+message BucketId {
+  string value = 1;
+}
+
+message ObjectId {
+  string value = 1;
+}
+
+message ChunkId {
+  string value = 1;
+}
+
+message BlobNodeId {
+  string value = 1;
+}
+
+// Standard pagination for list RPCs.
+message PageRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message PageResponse {
+  string next_page_token = 1;
+}
