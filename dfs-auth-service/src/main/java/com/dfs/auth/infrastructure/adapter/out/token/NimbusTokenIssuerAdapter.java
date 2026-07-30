@@ -5,6 +5,7 @@ import com.dfs.auth.config.AuthProperties;
 import com.dfs.auth.domain.model.AccessToken;
 import com.dfs.auth.domain.model.Principal;
 import com.dfs.common.security.DfsJwtClaims;
+import com.dfs.common.security.DfsJwtProperties;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
@@ -29,10 +30,13 @@ class NimbusTokenIssuerAdapter implements TokenIssuerPort {
     private final Duration ttl;
     private final Clock clock;
 
-    NimbusTokenIssuerAdapter(JwtEncoder jwtEncoder, AuthProperties properties, Clock clock) {
+    NimbusTokenIssuerAdapter(JwtEncoder jwtEncoder,
+                             DfsJwtProperties jwtProperties,
+                             AuthProperties authProperties,
+                             Clock clock) {
         this.jwtEncoder = jwtEncoder;
-        this.issuer = properties.jwt().issuer();
-        this.ttl = properties.jwt().accessTokenTtl();
+        this.issuer = jwtProperties.issuer();
+        this.ttl = authProperties.jwt().accessTokenTtl();
         this.clock = clock;
     }
 

@@ -4,6 +4,7 @@ import com.dfs.auth.api.rest.dto.ApiKeyResponse;
 import com.dfs.auth.api.rest.dto.CreateApiKeyRequest;
 import com.dfs.auth.api.rest.dto.IssuedApiKeyResponse;
 import com.dfs.auth.application.port.in.ApiKeyUseCase;
+import com.dfs.common.security.DfsTokenClaims;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -34,17 +35,17 @@ class ApiKeyController {
     @ResponseStatus(HttpStatus.CREATED)
     IssuedApiKeyResponse createApiKey(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateApiKeyRequest request) {
         return IssuedApiKeyResponse.from(apiKeys.createApiKey(new ApiKeyUseCase.CreateApiKeyCommand(
-                TenantClaims.tenantId(jwt), TenantClaims.userId(jwt), request.name(), request.expiresAt())));
+                DfsTokenClaims.tenantId(jwt), DfsTokenClaims.userId(jwt), request.name(), request.expiresAt())));
     }
 
     @GetMapping
     List<ApiKeyResponse> listApiKeys(@AuthenticationPrincipal Jwt jwt) {
-        return apiKeys.listApiKeys(TenantClaims.tenantId(jwt)).stream().map(ApiKeyResponse::from).toList();
+        return apiKeys.listApiKeys(DfsTokenClaims.tenantId(jwt)).stream().map(ApiKeyResponse::from).toList();
     }
 
     @DeleteMapping("/{apiKeyId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     void revokeApiKey(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID apiKeyId) {
-        apiKeys.revokeApiKey(TenantClaims.tenantId(jwt), apiKeyId);
+        apiKeys.revokeApiKey(DfsTokenClaims.tenantId(jwt), apiKeyId);
     }
 }

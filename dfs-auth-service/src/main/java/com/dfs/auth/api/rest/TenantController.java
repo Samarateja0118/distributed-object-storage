@@ -6,6 +6,7 @@ import com.dfs.auth.api.rest.dto.TenantRegistrationResponse;
 import com.dfs.auth.api.rest.dto.TenantResponse;
 import com.dfs.auth.api.rest.dto.UserResponse;
 import com.dfs.auth.application.port.in.TenantUseCase;
+import com.dfs.common.security.DfsTokenClaims;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -43,19 +44,19 @@ class TenantController {
 
     @GetMapping("/tenant")
     TenantResponse getOwnTenant(@AuthenticationPrincipal Jwt jwt) {
-        return TenantResponse.from(tenants.getTenant(TenantClaims.tenantId(jwt)));
+        return TenantResponse.from(tenants.getTenant(DfsTokenClaims.tenantId(jwt)));
     }
 
     @PostMapping("/tenant/users")
     @ResponseStatus(HttpStatus.CREATED)
     UserResponse addUser(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateUserRequest request) {
-        UUID tenantId = TenantClaims.tenantId(jwt);
+        UUID tenantId = DfsTokenClaims.tenantId(jwt);
         return UserResponse.from(tenants.addUser(
                 new TenantUseCase.AddUserCommand(tenantId, request.email(), request.password())));
     }
 
     @GetMapping("/tenant/users")
     List<UserResponse> listUsers(@AuthenticationPrincipal Jwt jwt) {
-        return tenants.listUsers(TenantClaims.tenantId(jwt)).stream().map(UserResponse::from).toList();
+        return tenants.listUsers(DfsTokenClaims.tenantId(jwt)).stream().map(UserResponse::from).toList();
     }
 }

@@ -8,12 +8,14 @@ spring:
       enabled: true
 
 dfs:
+  security:
+    jwt:
+      issuer: dfs-auth-test
+      signing-secret: test-signing-secret-not-used-outside-tests
   auth:
     api-key-cache-ttl: 5m
     jwt:
-      issuer: dfs-auth-test
       access-token-ttl: 15m
-      signing-secret: test-signing-secret-not-used-outside-tests
 
 logging:
   level:

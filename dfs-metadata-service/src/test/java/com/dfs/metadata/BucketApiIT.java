@@ -18,7 +18,7 @@ class BucketApiIT extends AbstractMetadataIT {
 
     @Test
     void createsBucketWithDefaults() throws Exception {
-        mockMvc.perform(put(BUCKETS + "/photos").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(put(BUCKETS + "/photos").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.name").value("photos"))
                 .andExpect(jsonPath("$.versioningEnabled").value(false))
@@ -29,7 +29,7 @@ class BucketApiIT extends AbstractMetadataIT {
     @Test
     void createsBucketWithExplicitSettings() throws Exception {
         mockMvc.perform(put(BUCKETS + "/archive")
-                        .header("X-Tenant-Id", tenantId)
+                        .header("Authorization", bearer(tenantId))
                         .contentType("application/json")
                         .content(json(Map.of("versioningEnabled", true, "defaultEncryption", "AES256"))))
                 .andExpect(status().isCreated())
@@ -39,66 +39,72 @@ class BucketApiIT extends AbstractMetadataIT {
 
     @Test
     void rejectsDuplicateBucketName() throws Exception {
-        mockMvc.perform(put(BUCKETS + "/dupes").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(put(BUCKETS + "/dupes").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isCreated());
 
-        mockMvc.perform(put(BUCKETS + "/dupes").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(put(BUCKETS + "/dupes").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.title").value("Bucket already exists"));
     }
 
     @Test
     void isolatesBucketNamesAcrossTenants() throws Exception {
-        mockMvc.perform(put(BUCKETS + "/shared-name").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(put(BUCKETS + "/shared-name").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(put(BUCKETS + "/shared-name")
-                        .header("X-Tenant-Id", java.util.UUID.randomUUID()))
+                        .header("Authorization", bearer(java.util.UUID.randomUUID())))
                 .andExpect(status().isCreated());
     }
 
     @Test
     void rejectsInvalidBucketNames() throws Exception {
         for (String invalid : new String[]{"AB", "Uppercase", "has--double", "-leading", "trailing-", "10.0.0.1"}) {
-            mockMvc.perform(put(BUCKETS + "/" + invalid).header("X-Tenant-Id", tenantId))
+            mockMvc.perform(put(BUCKETS + "/" + invalid).header("Authorization", bearer(tenantId)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.title").value("Invalid request"));
         }
     }
 
     @Test
-    void requiresTenantHeader() throws Exception {
-        mockMvc.perform(put(BUCKETS + "/no-tenant"))
-                .andExpect(status().isBadRequest());
+    void rejectsRequestWithoutToken() throws Exception {
+        mockMvc.perform(put(BUCKETS + "/no-token"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void rejectsUnverifiableToken() throws Exception {
+        mockMvc.perform(put(BUCKETS + "/bad-token").header("Authorization", "Bearer not.a.jwt"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
     void getsAndHeadsExistingBucket() throws Exception {
-        mockMvc.perform(put(BUCKETS + "/reports").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(put(BUCKETS + "/reports").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isCreated());
 
-        mockMvc.perform(get(BUCKETS + "/reports").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(BUCKETS + "/reports").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name").value("reports"));
 
-        mockMvc.perform(head(BUCKETS + "/reports").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(head(BUCKETS + "/reports").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isOk());
     }
 
     @Test
     void returnsNotFoundForUnknownBucket() throws Exception {
-        mockMvc.perform(get(BUCKETS + "/missing-bucket").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(BUCKETS + "/missing-bucket").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.title").value("Resource not found"));
     }
 
     @Test
     void listsBucketsForTenantOnly() throws Exception {
-        mockMvc.perform(put(BUCKETS + "/alpha").header("X-Tenant-Id", tenantId));
-        mockMvc.perform(put(BUCKETS + "/beta").header("X-Tenant-Id", tenantId));
-        mockMvc.perform(put(BUCKETS + "/other").header("X-Tenant-Id", java.util.UUID.randomUUID()));
+        mockMvc.perform(put(BUCKETS + "/alpha").header("Authorization", bearer(tenantId)));
+        mockMvc.perform(put(BUCKETS + "/beta").header("Authorization", bearer(tenantId)));
+        mockMvc.perform(put(BUCKETS + "/other").header("Authorization", bearer(java.util.UUID.randomUUID())));
 
-        mockMvc.perform(get(BUCKETS).header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(BUCKETS).header("Authorization", bearer(tenantId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(2))
                 .andExpect(jsonPath("$.items[0].name").value("alpha"))
@@ -107,25 +113,25 @@ class BucketApiIT extends AbstractMetadataIT {
 
     @Test
     void togglesVersioning() throws Exception {
-        mockMvc.perform(put(BUCKETS + "/toggle").header("X-Tenant-Id", tenantId));
+        mockMvc.perform(put(BUCKETS + "/toggle").header("Authorization", bearer(tenantId)));
 
         mockMvc.perform(patch(BUCKETS + "/toggle")
-                        .header("X-Tenant-Id", tenantId)
+                        .header("Authorization", bearer(tenantId))
                         .contentType("application/json")
                         .content(json(Map.of("versioningEnabled", true))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.versioningEnabled").value(true));
 
-        mockMvc.perform(get(BUCKETS + "/toggle").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(BUCKETS + "/toggle").header("Authorization", bearer(tenantId)))
                 .andExpect(jsonPath("$.versioningEnabled").value(true));
     }
 
     @Test
     void rejectsPatchWithMissingField() throws Exception {
-        mockMvc.perform(put(BUCKETS + "/patch-invalid").header("X-Tenant-Id", tenantId));
+        mockMvc.perform(put(BUCKETS + "/patch-invalid").header("Authorization", bearer(tenantId)));
 
         mockMvc.perform(patch(BUCKETS + "/patch-invalid")
-                        .header("X-Tenant-Id", tenantId)
+                        .header("Authorization", bearer(tenantId))
                         .contentType("application/json")
                         .content("{}"))
                 .andExpect(status().isBadRequest())
@@ -134,30 +140,30 @@ class BucketApiIT extends AbstractMetadataIT {
 
     @Test
     void deletesEmptyBucketAndAllowsNameReuse() throws Exception {
-        mockMvc.perform(put(BUCKETS + "/temp").header("X-Tenant-Id", tenantId));
+        mockMvc.perform(put(BUCKETS + "/temp").header("Authorization", bearer(tenantId)));
 
-        mockMvc.perform(delete(BUCKETS + "/temp").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(delete(BUCKETS + "/temp").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isNoContent());
 
-        mockMvc.perform(get(BUCKETS + "/temp").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(BUCKETS + "/temp").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isNotFound());
 
-        mockMvc.perform(put(BUCKETS + "/temp").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(put(BUCKETS + "/temp").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isCreated());
     }
 
     @Test
     void refusesToDeleteNonEmptyBucket() throws Exception {
-        mockMvc.perform(put(BUCKETS + "/occupied").header("X-Tenant-Id", tenantId));
+        mockMvc.perform(put(BUCKETS + "/occupied").header("Authorization", bearer(tenantId)));
         mockMvc.perform(put(BUCKETS + "/occupied/objects/file.txt")
-                        .header("X-Tenant-Id", tenantId)
+                        .header("Authorization", bearer(tenantId))
                         .contentType("application/json")
                         .content(json(Map.of(
                                 "sizeBytes", 10,
                                 "contentHash", "a".repeat(64)))))
                 .andExpect(status().isCreated());
 
-        mockMvc.perform(delete(BUCKETS + "/occupied").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(delete(BUCKETS + "/occupied").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.title").value("Bucket not empty"));
     }

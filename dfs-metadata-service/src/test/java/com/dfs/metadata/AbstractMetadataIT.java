@@ -1,5 +1,7 @@
 package com.dfs.metadata;
 
+import com.dfs.common.security.DfsJwtProperties;
+import com.dfs.common.security.DfsTestTokens;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +42,11 @@ abstract class AbstractMetadataIT {
     @Autowired
     protected ObjectMapper objectMapper;
 
+    @Autowired
+    private DfsJwtProperties jwtProperties;
+
+    private DfsTestTokens tokens;
+
     /**
      * Each test runs under a fresh tenant, which isolates it without truncating
      * shared tables between cases.
@@ -53,5 +60,17 @@ abstract class AbstractMetadataIT {
 
     protected String json(Object value) throws Exception {
         return objectMapper.writeValueAsString(value);
+    }
+
+    /**
+     * A real signed token rather than a mocked principal, so the decoder, the
+     * issuer check, and the claim names are all exercised — those are exactly the
+     * parts that break when issuer and validator drift apart.
+     */
+    protected String bearer(UUID tenant) {
+        if (tokens == null) {
+            tokens = new DfsTestTokens(jwtProperties);
+        }
+        return tokens.bearerFor(tenant);
     }
 }

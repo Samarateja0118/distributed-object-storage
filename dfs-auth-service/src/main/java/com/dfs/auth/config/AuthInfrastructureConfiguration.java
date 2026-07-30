@@ -1,5 +1,6 @@
 package com.dfs.auth.config;
 
+import com.dfs.common.security.DfsJwtProperties;
 import com.dfs.common.security.HmacSigningKey;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import org.springframework.context.annotation.Bean;
@@ -19,8 +20,8 @@ public class AuthInfrastructureConfiguration {
     }
 
     @Bean
-    JwtEncoder jwtEncoder(AuthProperties properties) {
-        SecretKey signingKey = HmacSigningKey.deriveFrom(properties.jwt().signingSecret());
+    JwtEncoder jwtEncoder(DfsJwtProperties properties) {
+        SecretKey signingKey = HmacSigningKey.deriveFrom(properties.signingSecret());
         return new NimbusJwtEncoder(new ImmutableSecret<>(signingKey));
     }
 }

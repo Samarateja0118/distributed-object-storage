@@ -39,6 +39,14 @@
                 <artifactId>dfs-common</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <!-- Shared test fixtures, notably DfsTestTokens. -->
+            <dependency>
+                <groupId>com.dfs</groupId>
+                <artifactId>dfs-common</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+                <scope>test</scope>
+            </dependency>
             <dependency>
                 <groupId>com.dfs</groupId>
                 <artifactId>dfs-proto</artifactId>

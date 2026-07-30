@@ -31,12 +31,16 @@ server:
 dfs:
   service-name: auth
   environment: ${DFS_ENV:local}
+  # Shared with every service that validates a token; both values must match
+  # there byte for byte.
+  security:
+    jwt:
+      issuer: dfs-auth
+      signing-secret: ${JWT_SIGNING_SECRET:change-me-in-production}
   auth:
     api-key-cache-ttl: 5m
     jwt:
-      issuer: dfs-auth
       access-token-ttl: 1h
-      signing-secret: ${JWT_SIGNING_SECRET:change-me-in-production}
 
 management:
   endpoints:

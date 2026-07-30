@@ -10,17 +10,12 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
 
 import com.dfs.common.infrastructure.config.DatabaseConfiguration;
 import com.dfs.common.infrastructure.config.OpenApiConfiguration;
 import com.dfs.common.infrastructure.config.RedisConfiguration;
-import com.dfs.common.security.HmacSigningKey;
-
-import javax.crypto.SecretKey;
 
 @Configuration
 @EnableWebSecurity
@@ -44,12 +39,6 @@ public class AuthSecurityConfiguration {
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder)))
                 .build();
-    }
-
-    @Bean
-    JwtDecoder jwtDecoder(AuthProperties properties) {
-        SecretKey signingKey = HmacSigningKey.deriveFrom(properties.jwt().signingSecret());
-        return NimbusJwtDecoder.withSecretKey(signingKey).macAlgorithm(MacAlgorithm.HS256).build();
     }
 
     @Bean

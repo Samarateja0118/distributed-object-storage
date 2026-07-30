@@ -24,7 +24,7 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
 
     private void createBucket(String name, boolean versioning) throws Exception {
         mockMvc.perform(put(BUCKETS + "/" + name)
-                        .header("X-Tenant-Id", tenantId)
+                        .header("Authorization", bearer(tenantId))
                         .contentType("application/json")
                         .content(json(Map.of("versioningEnabled", versioning))))
                 .andExpect(status().isCreated());
@@ -44,7 +44,7 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
         createBucket("docs", false);
 
         mockMvc.perform(put(BUCKETS + "/docs/objects/notes.txt")
-                        .header("X-Tenant-Id", tenantId)
+                        .header("Authorization", bearer(tenantId))
                         .contentType("application/json")
                         .content(json(putBody(2048, HASH_A, Map.of("author", "sam")))))
                 .andExpect(status().isCreated())
@@ -63,13 +63,13 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
         String key = "2026/07/quarterly-report.pdf";
 
         mockMvc.perform(put(BUCKETS + "/nested/objects/" + key)
-                        .header("X-Tenant-Id", tenantId)
+                        .header("Authorization", bearer(tenantId))
                         .contentType("application/json")
                         .content(json(putBody(10, HASH_A, Map.of()))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.key").value(key));
 
-        mockMvc.perform(get(BUCKETS + "/nested/objects/" + key).header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(BUCKETS + "/nested/objects/" + key).header("Authorization", bearer(tenantId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.key").value(key));
     }
@@ -82,7 +82,7 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
         body.put("contentHash", HASH_A);
 
         mockMvc.perform(put(BUCKETS + "/defaults/objects/blob.bin")
-                        .header("X-Tenant-Id", tenantId)
+                        .header("Authorization", bearer(tenantId))
                         .contentType("application/json")
                         .content(json(body)))
                 .andExpect(status().isCreated())
@@ -94,15 +94,15 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
     void getsAndHeadsObject() throws Exception {
         createBucket("readable", false);
         mockMvc.perform(put(BUCKETS + "/readable/objects/a.txt")
-                .header("X-Tenant-Id", tenantId)
+                .header("Authorization", bearer(tenantId))
                 .contentType("application/json")
                 .content(json(putBody(512, HASH_A, Map.of()))));
 
-        mockMvc.perform(get(BUCKETS + "/readable/objects/a.txt").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(BUCKETS + "/readable/objects/a.txt").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isOk())
                 .andExpect(header().string("ETag", "\"" + HASH_A + "\""));
 
-        mockMvc.perform(head(BUCKETS + "/readable/objects/a.txt").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(head(BUCKETS + "/readable/objects/a.txt").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isOk())
                 .andExpect(header().string("ETag", "\"" + HASH_A + "\""))
                 .andExpect(header().exists("X-Object-Version-Id"));
@@ -113,15 +113,15 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
         createBucket("flat", false);
         String path = BUCKETS + "/flat/objects/file.txt";
 
-        mockMvc.perform(put(path).header("X-Tenant-Id", tenantId)
+        mockMvc.perform(put(path).header("Authorization", bearer(tenantId))
                 .contentType("application/json").content(json(putBody(100, HASH_A, Map.of()))));
-        mockMvc.perform(put(path).header("X-Tenant-Id", tenantId)
+        mockMvc.perform(put(path).header("Authorization", bearer(tenantId))
                         .contentType("application/json").content(json(putBody(200, HASH_B, Map.of()))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.sizeBytes").value(200))
                 .andExpect(jsonPath("$.etag").value(HASH_B));
 
-        mockMvc.perform(get(BUCKETS + "/flat/object-versions/file.txt").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(BUCKETS + "/flat/object-versions/file.txt").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1));
     }
@@ -131,12 +131,12 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
         createBucket("versioned", true);
         String path = BUCKETS + "/versioned/objects/file.txt";
 
-        String first = mockMvc.perform(put(path).header("X-Tenant-Id", tenantId)
+        String first = mockMvc.perform(put(path).header("Authorization", bearer(tenantId))
                         .contentType("application/json").content(json(putBody(100, HASH_A, Map.of()))))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
 
-        String second = mockMvc.perform(put(path).header("X-Tenant-Id", tenantId)
+        String second = mockMvc.perform(put(path).header("Authorization", bearer(tenantId))
                         .contentType("application/json").content(json(putBody(200, HASH_B, Map.of()))))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
@@ -145,10 +145,10 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
         JsonNode secondNode = objectMapper.readTree(second);
         assertThat(firstNode.get("versionId").asText()).isNotEqualTo(secondNode.get("versionId").asText());
 
-        mockMvc.perform(get(path).header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(path).header("Authorization", bearer(tenantId)))
                 .andExpect(jsonPath("$.sizeBytes").value(200));
 
-        mockMvc.perform(get(BUCKETS + "/versioned/object-versions/file.txt").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(BUCKETS + "/versioned/object-versions/file.txt").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2));
     }
@@ -158,17 +158,17 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
         createBucket("listing", false);
         for (String key : new String[]{"img/a.png", "img/b.png", "doc/c.txt"}) {
             mockMvc.perform(put(BUCKETS + "/listing/objects/" + key)
-                    .header("X-Tenant-Id", tenantId)
+                    .header("Authorization", bearer(tenantId))
                     .contentType("application/json")
                     .content(json(putBody(1, HASH_A, Map.of()))));
         }
 
-        mockMvc.perform(get(BUCKETS + "/listing/objects").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(BUCKETS + "/listing/objects").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(3));
 
         mockMvc.perform(get(BUCKETS + "/listing/objects")
-                        .header("X-Tenant-Id", tenantId)
+                        .header("Authorization", bearer(tenantId))
                         .param("prefix", "img/"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(2))
@@ -180,13 +180,13 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
         createBucket("paged", false);
         for (int i = 0; i < 5; i++) {
             mockMvc.perform(put(BUCKETS + "/paged/objects/key-" + i)
-                    .header("X-Tenant-Id", tenantId)
+                    .header("Authorization", bearer(tenantId))
                     .contentType("application/json")
                     .content(json(putBody(1, HASH_A, Map.of()))));
         }
 
         mockMvc.perform(get(BUCKETS + "/paged/objects")
-                        .header("X-Tenant-Id", tenantId)
+                        .header("Authorization", bearer(tenantId))
                         .param("page", "1")
                         .param("size", "2"))
                 .andExpect(status().isOk())
@@ -201,19 +201,19 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
     void updatesUserMetadata() throws Exception {
         createBucket("taggable", false);
         mockMvc.perform(put(BUCKETS + "/taggable/objects/a.txt")
-                .header("X-Tenant-Id", tenantId)
+                .header("Authorization", bearer(tenantId))
                 .contentType("application/json")
                 .content(json(putBody(1, HASH_A, Map.of("stage", "draft")))));
 
         mockMvc.perform(patch(BUCKETS + "/taggable/objects/a.txt")
-                        .header("X-Tenant-Id", tenantId)
+                        .header("Authorization", bearer(tenantId))
                         .contentType("application/json")
                         .content(json(Map.of("userMetadata", Map.of("stage", "final", "owner", "sam")))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.userMetadata.stage").value("final"))
                 .andExpect(jsonPath("$.userMetadata.owner").value("sam"));
 
-        mockMvc.perform(get(BUCKETS + "/taggable/objects/a.txt").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(BUCKETS + "/taggable/objects/a.txt").header("Authorization", bearer(tenantId)))
                 .andExpect(jsonPath("$.userMetadata.stage").value("final"));
     }
 
@@ -221,16 +221,16 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
     void deletesObjectAndAllowsRecreate() throws Exception {
         createBucket("deletable", false);
         String path = BUCKETS + "/deletable/objects/gone.txt";
-        mockMvc.perform(put(path).header("X-Tenant-Id", tenantId)
+        mockMvc.perform(put(path).header("Authorization", bearer(tenantId))
                 .contentType("application/json").content(json(putBody(1, HASH_A, Map.of()))));
 
-        mockMvc.perform(delete(path).header("X-Tenant-Id", tenantId))
+        mockMvc.perform(delete(path).header("Authorization", bearer(tenantId)))
                 .andExpect(status().isNoContent());
 
-        mockMvc.perform(get(path).header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(path).header("Authorization", bearer(tenantId)))
                 .andExpect(status().isNotFound());
 
-        mockMvc.perform(put(path).header("X-Tenant-Id", tenantId)
+        mockMvc.perform(put(path).header("Authorization", bearer(tenantId))
                         .contentType("application/json").content(json(putBody(5, HASH_B, Map.of()))))
                 .andExpect(status().isCreated());
     }
@@ -239,15 +239,15 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
     void deleteRemovesEveryVersion() throws Exception {
         createBucket("multi", true);
         String path = BUCKETS + "/multi/objects/v.txt";
-        mockMvc.perform(put(path).header("X-Tenant-Id", tenantId)
+        mockMvc.perform(put(path).header("Authorization", bearer(tenantId))
                 .contentType("application/json").content(json(putBody(1, HASH_A, Map.of()))));
-        mockMvc.perform(put(path).header("X-Tenant-Id", tenantId)
+        mockMvc.perform(put(path).header("Authorization", bearer(tenantId))
                 .contentType("application/json").content(json(putBody(2, HASH_B, Map.of()))));
 
-        mockMvc.perform(delete(path).header("X-Tenant-Id", tenantId))
+        mockMvc.perform(delete(path).header("Authorization", bearer(tenantId)))
                 .andExpect(status().isNoContent());
 
-        mockMvc.perform(get(BUCKETS + "/multi/object-versions/v.txt").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(BUCKETS + "/multi/object-versions/v.txt").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isNotFound());
     }
 
@@ -255,14 +255,14 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
     void returnsNotFoundForMissingObjectAndBucket() throws Exception {
         createBucket("present", false);
 
-        mockMvc.perform(get(BUCKETS + "/present/objects/absent.txt").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(BUCKETS + "/present/objects/absent.txt").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.title").value("Resource not found"));
 
-        mockMvc.perform(get(BUCKETS + "/no-such-bucket/objects/a.txt").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(get(BUCKETS + "/no-such-bucket/objects/a.txt").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isNotFound());
 
-        mockMvc.perform(delete(BUCKETS + "/present/objects/absent.txt").header("X-Tenant-Id", tenantId))
+        mockMvc.perform(delete(BUCKETS + "/present/objects/absent.txt").header("Authorization", bearer(tenantId)))
                 .andExpect(status().isNotFound());
     }
 
@@ -271,13 +271,13 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
         createBucket("strict", false);
         String path = BUCKETS + "/strict/objects/bad.txt";
 
-        mockMvc.perform(put(path).header("X-Tenant-Id", tenantId)
+        mockMvc.perform(put(path).header("Authorization", bearer(tenantId))
                         .contentType("application/json")
                         .content(json(putBody(-1, HASH_A, Map.of()))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors.sizeBytes").isNotEmpty());
 
-        mockMvc.perform(put(path).header("X-Tenant-Id", tenantId)
+        mockMvc.perform(put(path).header("Authorization", bearer(tenantId))
                         .contentType("application/json")
                         .content(json(putBody(1, "not-a-valid-hash", Map.of()))))
                 .andExpect(status().isBadRequest())
@@ -285,7 +285,7 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
 
         Map<String, Object> missingHash = new HashMap<>();
         missingHash.put("sizeBytes", 1);
-        mockMvc.perform(put(path).header("X-Tenant-Id", tenantId)
+        mockMvc.perform(put(path).header("Authorization", bearer(tenantId))
                         .contentType("application/json")
                         .content(json(missingHash)))
                 .andExpect(status().isBadRequest());
@@ -295,12 +295,12 @@ class ObjectMetadataApiIT extends AbstractMetadataIT {
     void objectsAreScopedToTheirTenant() throws Exception {
         createBucket("scoped", false);
         mockMvc.perform(put(BUCKETS + "/scoped/objects/secret.txt")
-                .header("X-Tenant-Id", tenantId)
+                .header("Authorization", bearer(tenantId))
                 .contentType("application/json")
                 .content(json(putBody(1, HASH_A, Map.of()))));
 
         mockMvc.perform(get(BUCKETS + "/scoped/objects/secret.txt")
-                        .header("X-Tenant-Id", java.util.UUID.randomUUID()))
+                        .header("Authorization", bearer(java.util.UUID.randomUUID())))
                 .andExpect(status().isNotFound());
     }
 }
