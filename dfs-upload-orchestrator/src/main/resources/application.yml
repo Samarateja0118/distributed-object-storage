@@ -24,12 +24,26 @@ server:
 dfs:
   service-name: upload-orchestrator
   environment: ${DFS_ENV:local}
+  # Must match the auth service byte for byte: this service validates the
+  # caller's token before forwarding it.
+  security:
+    jwt:
+      issuer: dfs-auth
+      signing-secret: ${JWT_SIGNING_SECRET:change-me-in-production}
   upload:
     chunk-size-mb: 8
     max-concurrent-chunks: 8
     multipart-session-ttl: 24h
+    # Phase 1 talks to both services over REST. The gRPC targets below are
+    # scaffolding for Phase 2 and are not read by anything yet.
     metadata-grpc-target: static://localhost:9082
     blob-grpc-target: static://localhost:9090
+    blob-base-url: ${BLOB_NODE_URL:http://localhost:8090}
+    metadata-base-url: ${METADATA_SERVICE_URL:http://localhost:8082}
+    # An upload is buffered whole in order to digest it, so this bounds heap
+    # per in-flight request, not just request size.
+    max-object-size: 100MB
+    downstream-timeout: 30s
 
 management:
   endpoints:

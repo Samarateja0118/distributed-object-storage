@@ -1,0 +1,18 @@
+# Redis and Kafka clients connect lazily, so their beans are left wired but
+# unused; Phase 1 orchestration tests exercise the two REST dependencies only,
+# which AbstractUploadOrchestratorIT stands up in-process.
+
+# Must match what AbstractUploadOrchestratorIT signs its tokens with.
+dfs:
+  security:
+    jwt:
+      issuer: dfs-auth-test
+      signing-secret: test-signing-secret-not-used-outside-tests
+  upload:
+    # Small enough to test the limit without allocating 100MB in a test.
+    max-object-size: 1MB
+    downstream-timeout: 5s
+
+logging:
+  level:
+    com.dfs.upload: DEBUG
