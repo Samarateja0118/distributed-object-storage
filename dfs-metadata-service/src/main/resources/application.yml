@@ -5,7 +5,7 @@ spring:
     virtual:
       enabled: true
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:dfs}
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:dfs_metadata}
     username: ${POSTGRES_USER:dfs}
     password: ${POSTGRES_PASSWORD:dfs}
     driver-class-name: org.postgresql.Driver

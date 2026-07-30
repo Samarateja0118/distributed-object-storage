@@ -67,6 +67,8 @@ Content and metadata live in different services, linked only by a SHA-256 hash:
 
 **PostgreSQL for metadata.** Buckets, objects, and versions are relational and carry invariants worth enforcing in the schema; the services use JPA over Flyway-managed migrations with `ddl-auto: validate`, so the schema is owned by migrations rather than inferred from entities.
 
+**One database per schema-owning service.** `dfs-auth-service`, `dfs-metadata-service`, and `dfs-admin-service` default to `dfs_auth`, `dfs_metadata`, and `dfs_admin`, created by `deploy/postgres/init-databases.sql` on first initialization of the Postgres volume. This is the "no service reaches into another's database" boundary made literal, and it is also load-bearing: each service ships its own `V1__` migration and its own default `flyway_schema_history`, so pointing two of them at one database means the second to start fails with a checksum mismatch on version 1 rather than applying its own schema. After editing that init script, recreate the volume with `docker compose -f deploy/docker-compose.yml down -v` — Postgres runs `docker-entrypoint-initdb.d` only on first init.
+
 **Clean Architecture.** The services are meant to be extracted and scaled independently in later phases. Keeping transport and persistence out of the domain is what makes that a refactor rather than a rewrite.
 
 ## Coding conventions
