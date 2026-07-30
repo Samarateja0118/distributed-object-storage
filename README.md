@@ -198,9 +198,7 @@ buffers each object in memory, which is what lets the digest be computed before
 the first byte is sent (Phase 2 chunking removes it), and auth stops at login,
 JWT, and API keys — a `role` claim exists, but no per-bucket RBAC is enforced.
 
-## Screenshots
-
-<!-- TODO: a couple of visuals. Options that demo well:
+<!-- TODO: add a Screenshots section. Options that demo well:
      - a terminal recording of the upload/download round trip above
      - Swagger UI at /swagger-ui.html for the metadata service
      - `tree` of the blob storage root, showing digest sharding
