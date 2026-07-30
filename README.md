@@ -1,131 +1,206 @@
 # Distributed File Storage (DFS)
 
-Production-grade distributed object storage platform built with **Java 21** and **Spring Boot 3.3**.
+A multi-tenant, S3-style object storage platform built with **Java 21** and **Spring Boot 3.3** — content-addressable blob storage, a metadata control plane, JWT-based tenant isolation, and an orchestration layer that keeps bytes and metadata consistent without a distributed transaction.
 
-This repository contains the Maven multi-module scaffold. Business logic is intentionally deferred — each module boots, wires configuration, and exposes health endpoints only.
+<!-- TODO: add a CI build-status badge once a workflow is wired up. -->
 
-## Architecture Overview
+> **Why I built this**
+>
+> <!-- TODO: your motivation, in your own words — a few honest sentences beat a
+> paragraph of buzzwords. Worth answering: what did you want to understand by
+> building storage rather than another CRUD service, and what surprised you? -->
 
-```
-Clients → Gateway → Auth / Metadata / Upload Orchestrator
-                         ↓              ↓
-                    PostgreSQL      Blob Nodes (gRPC)
-                         ↓
-                       Kafka → Replication / GC
-```
-
-| Module | Port (HTTP) | gRPC | Purpose |
-|--------|-------------|------|---------|
-| `dfs-gateway-service` | 8080 | — | Edge routing and rate limiting |
-| `dfs-auth-service` | 8081 | — | Authentication and authorization |
-| `dfs-metadata-service` | 8082 | 9082 | Buckets, objects, chunk metadata |
-| `dfs-upload-orchestrator` | 8083 | — | Upload/download orchestration |
-| `dfs-blob-node` | 8090 | 9090 | Chunk storage on local disk |
-| `dfs-replication-service` | 8084 | — | Async chunk replication |
-| `dfs-gc-service` | 8085 | — | Garbage collection |
-| `dfs-admin-service` | 8086 | — | Cluster operations |
-
-## Module Structure
+## Architecture
 
 ```
-distributed-file-storage/
-├── dfs-bom/                    # Dependency version alignment (BOM)
-├── dfs-proto/                  # gRPC / Protobuf contracts
-├── dfs-common/                 # Shared kernel and infrastructure config
-├── dfs-gateway-service/        # Edge API gateway
-├── dfs-auth-service/           # Auth & RBAC
-├── dfs-metadata-service/       # Metadata control plane
-├── dfs-upload-orchestrator/    # Upload/download orchestration
-├── dfs-blob-node/              # Data-plane chunk storage
-├── dfs-replication-service/    # Replication coordinator
-├── dfs-gc-service/             # Garbage collector
-├── dfs-admin-service/          # Admin / ops API
-├── dfs-integration-tests/      # Cross-service integration tests
-└── deploy/
-    └── docker-compose.yml      # Local infrastructure
+                    ┌───────────────┐
+   Clients ────────►│    Gateway    │
+                    └───────┬───────┘
+                            │
+        ┌───────────────────┼────────────────────┐
+        ▼                   ▼                    ▼
+  ┌───────────┐     ┌──────────────┐     ┌───────────────┐
+  │   Auth    │     │   Metadata   │◄────┤    Upload     │
+  │  service  │     │   service    │     │ orchestrator  │
+  └─────┬─────┘     └──────┬───────┘     └───────┬───────┘
+        │                  │                     │
+        ▼                  ▼                     ▼
+  ┌───────────┐     ┌──────────────┐     ┌───────────────┐
+  │   Redis   │     │  PostgreSQL  │     │   Blob node   │
+  │ (API keys)│     │  (metadata)  │     │ (content, CAS)│
+  └───────────┘     └──────────────┘     └───────────────┘
 ```
 
-## Clean Architecture Layers (per service)
+An object is stored as **two halves**. Its bytes live on the blob node, addressed
+by the SHA-256 of their own content. Its metadata lives in PostgreSQL, holding the
+bucket, key, version, and the digest naming those bytes. The upload orchestrator
+is the only component that joins them.
 
-Each service follows the same package layout:
+That split is what makes deduplication and idempotent writes possible, and it is
+also the system's most interesting problem: no transaction spans the two
+services, so a partial failure is always possible. Which inconsistency the system
+chooses to leave behind is documented in
+[ADR 6](docs/adr/0006-blob-first-writes-metadata-first-reads.md).
 
-```
-com.dfs.{service}/
-├── domain/              # Entities, value objects, domain services
-├── application/port/    # Use-case interfaces (inbound/outbound ports)
-├── infrastructure/      # Adapters: JPA, Kafka, gRPC, Redis
-├── api/rest/            # REST controllers (public)
-├── api/grpc/            # gRPC service implementations (internal)
-└── config/              # Spring @Configuration classes
-```
+## Features
 
-**Dependency rule:** `domain` → `application` → `infrastructure` / `api`. Domain never depends on Spring or transport.
+**Multi-tenant authentication**
+- Tenant and user registration with bcrypt password hashing
+- HS256 JWT issuance; tenancy travels in a `tenant_id` claim, never a header
+- API keys stored as prefix + hash, revealed once, Redis-cached with revocation evicting the entry
 
-## Prerequisites
+**Metadata control plane**
+- Per-tenant buckets and objects, with object versioning and version history
+- User-defined object metadata
+- RFC 7807 problem details, with per-field validation errors
 
-- JDK 21
-- Maven 3.9+
-- Docker & Docker Compose
+**Content-addressable blob storage**
+- Blobs named by their SHA-256 digest and deduplicated across tenants
+- Content hashed while streaming; a body that does not match its digest is rejected before publication
+- Crash-safe writes — staged, fsynced, then atomically renamed, so a reader never observes a partial blob
+- Storage sharded two levels deep by digest prefix
 
-## Quick Start
+**Upload orchestration**
+- Whole-object upload and download, joining content to metadata
+- The caller's own JWT is forwarded to both downstream services; there is no service account anywhere
+- Write ordering chosen so a partial failure never leaves an object that lists but cannot be downloaded
 
-### 1. Start infrastructure
+## Tech stack
+
+| Area | Choice |
+|---|---|
+| Language / runtime | Java 21 |
+| Framework | Spring Boot 3.3, Spring Security (OAuth2 resource server) |
+| Persistence | PostgreSQL, Spring Data JPA, Flyway migrations |
+| Caching | Redis |
+| Messaging | Kafka (Phase 3 onward) |
+| RPC | REST today; gRPC / Protobuf scaffolded for Phase 2 |
+| Testing | JUnit 5, Testcontainers, MockMvc, AssertJ |
+| Build | Maven multi-module |
+
+## Getting started
+
+**Prerequisites:** JDK 21, Maven 3.9+, Docker (or Colima).
 
 ```bash
+# 1. Start infrastructure
 docker compose -f deploy/docker-compose.yml up -d
-```
 
-### 2. Build all modules
-
-```bash
+# 2. Build and run the full test suite
 mvn clean verify
+
+# 3. Run a service
+mvn -pl dfs-metadata-service -am spring-boot:run
 ```
 
-### 3. Run a service (example: metadata)
+Running the tests under Colima rather than Docker Desktop needs a little extra
+configuration — see [CLAUDE.md](CLAUDE.md#container-runtime).
+
+### A round trip
 
 ```bash
-mvn -pl dfs-metadata-service spring-boot:run
+# Register a tenant
+curl -sX POST localhost:8081/api/v1/tenants \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "name": "Acme Corp",
+        "slug": "acme",
+        "ownerEmail": "owner@acme.test",
+        "ownerPassword": "correct-horse-battery"
+      }'
+
+# Log in and capture the access token
+TOKEN=$(curl -sX POST localhost:8081/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"owner@acme.test","password":"correct-horse-battery"}' \
+  | jq -r .accessToken)
+
+# Create a bucket
+curl -X PUT localhost:8082/api/v1/buckets/photos \
+  -H "Authorization: Bearer $TOKEN"
+
+# Upload an object — hashed, stored, then registered
+curl -X PUT localhost:8083/api/v1/buckets/photos/objects/hello.txt \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: text/plain' \
+  --data-binary 'hello world'
+
+# Read it back
+curl localhost:8083/api/v1/buckets/photos/objects/hello.txt \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
-### 4. Verify health
+Uploading identical bytes under a second key stores one blob, not two — the
+digest in the upload response is the same both times.
+
+## Services
+
+| Module | Port | Purpose |
+|---|---|---|
+| `dfs-gateway-service` | 8080 | Edge routing, rate limiting |
+| `dfs-auth-service` | 8081 | Tenants, users, JWT, API keys |
+| `dfs-metadata-service` | 8082 | Buckets, objects, versions |
+| `dfs-upload-orchestrator` | 8083 | Upload/download orchestration |
+| `dfs-replication-service` | 8084 | Async replication |
+| `dfs-gc-service` | 8085 | Garbage collection, refcounting |
+| `dfs-admin-service` | 8086 | Cluster and tenant operations |
+| `dfs-blob-node` | 8090 | Content-addressable blob storage |
+
+Auth, metadata, blob node, and the orchestrator are implemented; the remaining
+four are scaffolds that boot and expose health endpoints, pending their phase.
+Every service uses the same hexagonal layout — see
+[ADR 1](docs/adr/0001-clean-architecture.md).
+
+## Design decisions
+
+The reasoning behind the non-obvious choices is recorded as
+[ADRs](docs/adr/README.md), costs included:
+
+- [Clean Architecture per service](docs/adr/0001-clean-architecture.md)
+- [One shared token contract](docs/adr/0002-shared-token-contract.md) — why four services share a single decoder
+- [Content-addressable storage](docs/adr/0003-content-addressable-storage.md) — why blobs are named by their own hash
+- [No DELETE on the blob node](docs/adr/0004-no-delete-on-blob-node.md) — why an apparent omission is deliberate
+- [REST before gRPC](docs/adr/0005-rest-before-grpc.md)
+- [Blob-first writes, metadata-first reads](docs/adr/0006-blob-first-writes-metadata-first-reads.md) — consistency without a distributed transaction
+- [Forwarding the caller's token](docs/adr/0007-forward-the-callers-token.md) — why there is no service account
+
+## Testing
+
+Integration tests run against real dependencies rather than mocks — PostgreSQL
+and Redis in Testcontainers, and, for the orchestrator, an in-process HTTP
+stand-in for each downstream service so the assertions cover the actual wire
+contract. Tests are named `*IT` and run at `verify`:
 
 ```bash
-curl http://localhost:8082/actuator/health
+mvn clean verify                                        # everything
+mvn -pl dfs-metadata-service -am verify                 # one module
+mvn -pl dfs-metadata-service -am verify -Dit.test=BucketApiIT
 ```
 
-## Configuration
+## Roadmap
 
-All services read configuration from `application.yml` with environment variable overrides:
+| Phase | Scope | Status |
+|---|---|---|
+| **1** | Auth, buckets, single-node object upload/download | ✅ Complete |
+| **2** | gRPC, chunking, multipart upload, multi-node distribution | Next |
+| **3** | Replication, GC and refcounting, presigned URLs, encryption | Planned |
+| **4** | Observability, benchmarking, admin ops, multi-tenant scale | Planned |
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `POSTGRES_HOST` | `localhost` | PostgreSQL host |
-| `POSTGRES_PORT` | `5432` | PostgreSQL port |
-| `POSTGRES_DB` | `dfs` | Database name |
-| `POSTGRES_USER` | `dfs` | Database user |
-| `POSTGRES_PASSWORD` | `dfs` | Database password |
-| `REDIS_HOST` | `localhost` | Redis host |
-| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka brokers |
-| `DFS_ENV` | `local` | Environment label |
-| `JWT_SIGNING_SECRET` | `change-me-in-production` | Auth JWT secret |
+Two Phase 1 limits are deliberate rather than unfinished: the orchestrator
+buffers each object in memory, which is what lets the digest be computed before
+the first byte is sent (Phase 2 chunking removes it), and auth stops at login,
+JWT, and API keys — a `role` claim exists, but no per-bucket RBAC is enforced.
 
-## Implementation Phases
+## Screenshots
 
-| Phase | Focus |
-|-------|-------|
-| **0** (current) | Scaffold, config, Docker Compose, CI-ready build |
-| **1** | Single-node MVP: auth, buckets, simple object upload/download |
-| **2** | Multi blob-node distribution, multipart, gRPC |
-| **3** | Replication, GC, presigned URLs, encryption, observability |
-| **4** | Service extraction, admin ops, multi-tenant scale |
-
-## Development Notes
-
-- Virtual threads are enabled on all services (`spring.threads.virtual.enabled=true`).
-- Flyway migrations use placeholder scripts until Phase 1 schema is implemented.
-- gRPC proto stubs are generated at build time from `dfs-proto/src/main/proto/`.
-- Security configs currently permit all requests — JWT enforcement comes in Phase 1.
+<!-- TODO: a couple of visuals. Options that demo well:
+     - a terminal recording of the upload/download round trip above
+     - Swagger UI at /swagger-ui.html for the metadata service
+     - `tree` of the blob storage root, showing digest sharding
+     - a green `mvn verify` with the integration-test summary -->
 
 ## License
 
-Private / unlicensed — update as needed.
+<!-- TODO: pick one and add a LICENSE file. MIT is the permissive default;
+     Apache-2.0 adds an explicit patent grant and reads as more deliberate for
+     infrastructure work. -->
