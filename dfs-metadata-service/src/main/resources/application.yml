@@ -39,6 +39,11 @@ grpc:
 dfs:
   service-name: metadata
   environment: ${DFS_ENV:local}
+  # Must match the auth service; this service only validates, it never mints.
+  security:
+    jwt:
+      issuer: dfs-auth
+      signing-secret: ${JWT_SIGNING_SECRET:change-me-in-production}
   metadata:
     cache-ttl: 10m
     default-replication-factor: 3
