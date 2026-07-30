@@ -1,0 +1,20 @@
+spring:
+  mvc:
+    problemdetails:
+      enabled: true
+
+# The gRPC server is not exercised by Phase 1 blob tests.
+grpc:
+  server:
+    port: -1
+
+dfs:
+  security:
+    jwt:
+      issuer: dfs-auth-test
+      signing-secret: test-signing-secret-not-used-outside-tests
+
+logging:
+  level:
+    root: WARN
+    com.dfs: INFO
