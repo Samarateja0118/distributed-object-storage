@@ -208,6 +208,4 @@ JWT, and API keys — a `role` claim exists, but no per-bucket RBAC is enforced.
 
 ## License
 
-<!-- TODO: pick one and add a LICENSE file. MIT is the permissive default;
-     Apache-2.0 adds an explicit patent grant and reads as more deliberate for
-     infrastructure work. -->
+Licensed under the Apache License, Version 2.0 — see [LICENSE](LICENSE).
