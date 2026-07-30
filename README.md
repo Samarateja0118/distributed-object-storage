@@ -4,11 +4,18 @@ A multi-tenant, S3-style object storage platform built with **Java 21** and **Sp
 
 <!-- TODO: add a CI build-status badge once a workflow is wired up. -->
 
-> **Why I built this**
->
-> <!-- TODO: your motivation, in your own words — a few honest sentences beat a
-> paragraph of buzzwords. Worth answering: what did you want to understand by
-> building storage rather than another CRUD service, and what surprised you? -->
+## Why I built this
+
+I built this project to deepen my understanding of distributed storage systems by
+implementing the core building blocks of an object storage platform. Rather than
+focusing on a single application, I wanted to explore how production systems
+separate metadata from data storage, coordinate uploads across services, enforce
+consistency boundaries, and evolve toward features such as chunking, replication,
+and garbage collection.
+
+The project emphasizes clean architecture, strong testing practices, and
+incremental evolution from a monolithic upload flow to a distributed object
+store.
 
 ## Architecture
 
