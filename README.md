@@ -105,6 +105,20 @@ configuration — see [CLAUDE.md](CLAUDE.md#container-runtime).
 
 ### A round trip
 
+The round trip crosses four services, so all four have to be running — each in
+its own terminal, since `spring-boot:run` stays in the foreground:
+
+```bash
+mvn -pl dfs-auth-service        -am spring-boot:run   # :8081
+mvn -pl dfs-metadata-service    -am spring-boot:run   # :8082
+mvn -pl dfs-upload-orchestrator -am spring-boot:run   # :8083
+mvn -pl dfs-blob-node           -am spring-boot:run   # :8090
+```
+
+Wait for each to report `Started …Application` before running the sequence
+below. If a port is already taken, override it — `SERVER_PORT=18082` — and tell
+the orchestrator where to look with `METADATA_SERVICE_URL` or `BLOB_NODE_URL`.
+
 ```bash
 # Register a tenant
 curl -sX POST localhost:8081/api/v1/tenants \
@@ -123,22 +137,30 @@ TOKEN=$(curl -sX POST localhost:8081/api/v1/auth/login \
   | jq -r .accessToken)
 
 # Create a bucket
-curl -X PUT localhost:8082/api/v1/buckets/photos \
+curl -sX PUT localhost:8082/api/v1/buckets/photos \
   -H "Authorization: Bearer $TOKEN"
+# → 201 {"id":"…","name":"photos","versioningEnabled":false,"defaultEncryption":"NONE",…}
 
 # Upload an object — hashed, stored, then registered
-curl -X PUT localhost:8083/api/v1/buckets/photos/objects/hello.txt \
+curl -sX PUT localhost:8083/api/v1/buckets/photos/objects/hello.txt \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: text/plain' \
   --data-binary 'hello world'
+# → 201 {"key":"hello.txt","versionId":"…","sizeBytes":11,"contentType":"text/plain",
+#        "contentHash":"b94d27b9…cde9","etag":"b94d27b9…cde9","userMetadata":{}}
 
-# Read it back
-curl localhost:8083/api/v1/buckets/photos/objects/hello.txt \
+# Read it back — the bytes, with the digest as ETag
+curl -i localhost:8083/api/v1/buckets/photos/objects/hello.txt \
   -H "Authorization: Bearer $TOKEN"
+# → 200, ETag: "b94d27b9…cde9", X-Object-Version-Id: …, body: hello world
 ```
 
-Uploading identical bytes under a second key stores one blob, not two — the
-digest in the upload response is the same both times.
+Uploading the same bytes under a second key stores one blob, not two — the
+`contentHash` in both upload responses is the same, and only one file appears
+under `blob-data/`. That holds across tenants as well as across keys: the blob
+is shared, while a second tenant asking for the first tenant's key still gets a
+404, because tenancy is enforced on the metadata pointer rather than on the
+bytes.
 
 ## Services
 
@@ -157,6 +179,13 @@ Auth, metadata, blob node, and the orchestrator are implemented; the remaining
 four are scaffolds that boot and expose health endpoints, pending their phase.
 Every service uses the same hexagonal layout — see
 [ADR 1](docs/adr/0001-clean-architecture.md).
+
+## Documentation
+
+- [Architecture](docs/architecture.md) — service map, the two cross-cutting contracts, layering, persistence
+- [Upload sequence](docs/upload-sequence.md) — blob first, metadata second, and what a partial failure leaves behind
+- [Download sequence](docs/download-sequence.md) — metadata first, because a digest has no owner
+- [Data model](docs/erd.md) — the tables, from the Flyway migrations
 
 ## Design decisions
 
