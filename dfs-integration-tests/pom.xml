@@ -40,6 +40,35 @@
             <artifactId>kafka</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- Declared so the reactor builds the services before this module, and so
+             -am rebuilds them. The tests never reference these classes: they launch
+             the repackaged jars as processes, which is the only way to exercise the
+             wiring that exists only once a service is packaged. -->
+        <dependency>
+            <groupId>com.dfs</groupId>
+            <artifactId>dfs-auth-service</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.dfs</groupId>
+            <artifactId>dfs-metadata-service</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.dfs</groupId>
+            <artifactId>dfs-blob-node</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.dfs</groupId>
+            <artifactId>dfs-upload-orchestrator</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -47,6 +76,12 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <dfs.repo.root>${project.basedir}/..</dfs.repo.root>
+                        <dfs.project.version>${project.version}</dfs.project.version>
+                    </systemPropertyVariables>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>
