@@ -2,7 +2,7 @@
 
 A multi-tenant, S3-style object storage platform built with **Java 21** and **Spring Boot 3.3** — content-addressable blob storage, a metadata control plane, JWT-based tenant isolation, and an orchestration layer that keeps bytes and metadata consistent without a distributed transaction.
 
-<!-- TODO: add a CI build-status badge once a workflow is wired up. -->
+[![CI](https://github.com/Samarateja0118/distributed-file-storage/actions/workflows/ci.yml/badge.svg)](https://github.com/Samarateja0118/distributed-file-storage/actions/workflows/ci.yml)
 
 ## Why I built this
 
