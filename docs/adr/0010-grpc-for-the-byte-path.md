@@ -59,6 +59,16 @@ authorization is exercised on the common path rather than through a privileged
 internal channel. Moving it to gRPC would have bought consistency of transport
 and cost that property, while rewriting a working path and its tests.
 
+**Retirement is a later step, and one test is coupled to it.** Swapping the
+transport changes only the orchestrator's adapter; clients still speak HTTP and
+the blob node still serves REST. So
+`ObjectLifecycleE2EIT.refusesUnauthenticatedBlobReads`, which asserts a 401 by
+calling `/internal/v1/blobs/{digest}` directly, stays correct and should be left
+exactly as it is until those endpoints go away. At that point it needs a gRPC
+equivalent asserting `UNAUTHENTICATED`: the property it guards is unchanged,
+only its entry point moves. Recorded here because a test that loses its subject
+tends to be deleted rather than replaced.
+
 The cost is two transports to configure, secure, and test, and a blob node that
 speaks one protocol to the orchestrator and another to nothing else once its REST
 endpoints are gone. `BlobStorePort` absorbs the change (ADR 1); orchestration
