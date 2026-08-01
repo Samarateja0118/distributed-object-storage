@@ -124,7 +124,7 @@ mvn clean verify -DargLine="-Dapi.version=1.44"
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Auth, buckets, single-node object upload/download | ✅ Complete |
-| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path done |
+| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path and chunking done |
 | **3** | Replication, GC, blob refcounting, presigned URLs, encryption | Planned |
 | **4** | Observability, benchmarking, admin ops, multi-tenant scale | Planned |
 
@@ -135,4 +135,8 @@ Two scoping decisions hold unless the repository owner changes them:
 1. gRPC carries the **byte path only** — the orchestrator's calls to the blob node. The metadata service and the client-facing API stay REST ([ADR 10](docs/adr/0010-grpc-for-the-byte-path.md)), and `metadataGrpcTarget` remains unused scaffolding. The blob node's REST endpoints also stay until the gRPC path has proven itself; `ObjectLifecycleE2EIT.refusesUnauthenticatedBlobReads` is coupled to them and needs a gRPC equivalent when they go.
 2. Auth is **login, JWT, and API keys — not full RBAC**. A `role` claim exists (OWNER/MEMBER) but nothing enforces per-bucket permissions.
 
-Uploads are still buffered whole in memory, bounded by `dfs.upload.max-object-size`, which is what allows the digest to be computed before the first byte is sent. One blob is still one chunk; Phase 2's chunked path removes that constraint.
+3. Chunk placement is **not yet a decision**. Every chunk is written to the single node named by `dfs.upload.blob-node-id`, and the value is recorded per chunk so reads follow it. Choosing among several nodes is [ADR 11](docs/adr/0011-chunk-placement-is-recorded-not-recomputed.md), still to come.
+
+An object is an ordered list of chunks, `dfs.upload.chunk-size` each. The orchestrator holds one chunk at a time in both directions, so `dfs.upload.max-object-size` is now a policy ceiling rather than a bound on heap. It is enforced against bytes as they are read — a `Content-Length` can be understated or omitted — so an oversized upload stores the chunks that fit before it is rejected. Nothing is registered, so the object never becomes visible, and the stray chunks are unreferenced bytes for GC.
+
+**An object's `contentHash` is the composite digest of its chunk list, not the SHA-256 of its bytes** ([ADR 9](docs/adr/0009-composite-digest-for-chunked-objects.md)). A client that hashes a file locally and compares it against the ETag will not match. Objects written before Phase 2 keep their true whole-object hash; nothing in the row distinguishes the two but age.
