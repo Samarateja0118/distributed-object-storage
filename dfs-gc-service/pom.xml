@@ -13,7 +13,7 @@
     <artifactId>dfs-gc-service</artifactId>
     <packaging>jar</packaging>
 
-    <name>Distributed File Storage :: GC Service</name>
+    <name>Distributed Object Storage :: GC Service</name>
     <description>Garbage collection for orphaned chunks and deleted objects</description>
 
     <dependencies>

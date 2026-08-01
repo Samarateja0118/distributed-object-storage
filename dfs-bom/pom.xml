@@ -9,7 +9,7 @@
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
-    <name>Distributed File Storage :: BOM</name>
+    <name>Distributed Object Storage :: BOM</name>
     <description>Centralized dependency version alignment for all DFS modules</description>
 
     <properties>

@@ -13,7 +13,7 @@
     <artifactId>dfs-admin-service</artifactId>
     <packaging>jar</packaging>
 
-    <name>Distributed File Storage :: Admin Service</name>
+    <name>Distributed Object Storage :: Admin Service</name>
     <description>Cluster operations: node registration, quotas, and repair triggers</description>
 
     <dependencies>

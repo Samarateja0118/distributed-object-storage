@@ -13,7 +13,7 @@
     <artifactId>dfs-auth-service</artifactId>
     <packaging>jar</packaging>
 
-    <name>Distributed File Storage :: Auth Service</name>
+    <name>Distributed Object Storage :: Auth Service</name>
     <description>Authentication, authorization, API keys, and signed token issuance</description>
 
     <dependencies>

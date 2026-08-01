@@ -13,7 +13,7 @@
     <artifactId>dfs-common</artifactId>
     <packaging>jar</packaging>
 
-    <name>Distributed File Storage :: Common</name>
+    <name>Distributed Object Storage :: Common</name>
     <description>Shared kernel: cross-cutting configuration, error model, and utilities</description>
 
     <dependencies>

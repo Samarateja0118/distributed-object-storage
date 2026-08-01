@@ -13,7 +13,7 @@
     <artifactId>dfs-gateway-service</artifactId>
     <packaging>jar</packaging>
 
-    <name>Distributed File Storage :: Gateway Service</name>
+    <name>Distributed Object Storage :: Gateway Service</name>
     <description>Edge API gateway: routing, rate limiting, and request hardening</description>
 
     <dependencies>

@@ -9,8 +9,8 @@
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
-    <name>Distributed File Storage :: Parent</name>
-    <description>Production-grade distributed file storage platform (Java 21 / Spring Boot)</description>
+    <name>Distributed Object Storage :: Parent</name>
+    <description>Multi-tenant, S3-inspired distributed object storage platform (Java 21 / Spring Boot)</description>
 
     <modules>
         <module>dfs-bom</module>

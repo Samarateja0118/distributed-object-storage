@@ -13,7 +13,7 @@
     <artifactId>dfs-replication-service</artifactId>
     <packaging>jar</packaging>
 
-    <name>Distributed File Storage :: Replication Service</name>
+    <name>Distributed Object Storage :: Replication Service</name>
     <description>Async chunk replication and repair coordination</description>
 
     <dependencies>
