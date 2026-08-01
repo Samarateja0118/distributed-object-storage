@@ -30,7 +30,7 @@ flowchart TB
     client -->|"create bucket, list objects"| meta
     client -->|"PUT/GET object bytes"| orch
 
-    orch -->|"PUT /internal/v1/blobs/{digest}"| blob
+    orch -->|"PutChunk / GetChunk (gRPC)"| blob
     orch -->|"PUT/GET /api/v1/buckets/../objects/.."| meta
 
     auth --- authdb
@@ -138,11 +138,12 @@ flowchart TB
 
 Concretely, in the orchestrator: `ObjectContentController` translates HTTP to
 `ObjectTransferUseCase`; `ObjectTransferService` implements the flow and depends
-on `BlobStorePort` and `MetadataRegistryPort`; `RestBlobStoreAdapter` and
-`RestMetadataRegistryAdapter` implement those ports over HTTP. Swapping REST for
-gRPC in Phase 2 replaces the adapters and touches neither the service nor the
-controller — that is the whole point of the arrangement, and the cost is a layer
-of interfaces that would be unnecessary in a system that never had to move.
+on `BlobStorePort` and `MetadataRegistryPort`; `GrpcBlobStoreAdapter` and
+`RestMetadataRegistryAdapter` implement those ports over their respective
+transports. Phase 2 collected on this: moving the byte path from REST to gRPC
+replaced one adapter and left the port, the service, and the controller
+untouched. The cost is a layer of interfaces that would be unnecessary in a
+system that never had to move.
 
 See [ADR 1](adr/0001-clean-architecture.md).
 
@@ -178,9 +179,11 @@ The asymmetry is deliberate and is the subject of
 
 ## What Phase 1 deliberately does not do
 
-- **No gRPC.** The orchestrator talks to the blob node over REST. The
-  `blobGrpcTarget` / `metadataGrpcTarget` properties and `blob.proto` are Phase 2
-  scaffolding and are read by nothing ([ADR 5](adr/0005-rest-before-grpc.md)).
+- **gRPC on the byte path only.** Phase 2 moved the orchestrator's calls to the
+  blob node onto gRPC; metadata stays REST, so the orchestrator uses the same
+  public API as any other client, and the client-facing API stays REST
+  ([ADR 10](adr/0010-grpc-for-the-byte-path.md)). The blob node still serves its
+  REST endpoints, which retire once the gRPC path has proven itself.
 - **No RBAC.** Auth stops at login, JWT, and API keys. A `role` claim exists
   (`OWNER` / `MEMBER`) but no per-bucket permission is enforced.
 - **No chunking.** Each upload is buffered whole in memory, bounded by

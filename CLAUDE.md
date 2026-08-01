@@ -124,15 +124,15 @@ mvn clean verify -DargLine="-Dapi.version=1.44"
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Auth, buckets, single-node object upload/download | ✅ Complete |
-| **2** | gRPC, chunking, multipart upload, multi-node distribution | Next |
+| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path done |
 | **3** | Replication, GC, blob refcounting, presigned URLs, encryption | Planned |
 | **4** | Observability, benchmarking, admin ops, multi-tenant scale | Planned |
 
 Phase 1 delivered the auth service, metadata service, blob node, and upload orchestrator, all covered by integration tests.
 
-Two Phase 1 scoping decisions hold unless the repository owner changes them:
+Two scoping decisions hold unless the repository owner changes them:
 
-1. The orchestrator talks to the blob node over **REST, not gRPC** — gRPC is Phase 2. The `blobGrpcTarget` / `metadataGrpcTarget` properties and `blob.proto` are scaffolding for that phase and are deliberately unused.
+1. gRPC carries the **byte path only** — the orchestrator's calls to the blob node. The metadata service and the client-facing API stay REST ([ADR 10](docs/adr/0010-grpc-for-the-byte-path.md)), and `metadataGrpcTarget` remains unused scaffolding. The blob node's REST endpoints also stay until the gRPC path has proven itself; `ObjectLifecycleE2EIT.refusesUnauthenticatedBlobReads` is coupled to them and needs a gRPC equivalent when they go.
 2. Auth is **login, JWT, and API keys — not full RBAC**. A `role` claim exists (OWNER/MEMBER) but nothing enforces per-bucket permissions.
 
-Phase 1 also buffers each upload in memory, bounded by `dfs.upload.max-object-size`, which is what allows the digest to be computed before the first byte is sent. Phase 2's chunked path removes that constraint.
+Uploads are still buffered whole in memory, bounded by `dfs.upload.max-object-size`, which is what allows the digest to be computed before the first byte is sent. One blob is still one chunk; Phase 2's chunked path removes that constraint.

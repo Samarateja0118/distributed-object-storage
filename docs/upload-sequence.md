@@ -19,12 +19,12 @@ sequenceDiagram
     O->>O: buffer body, bounded by max-object-size
     O->>O: digest = SHA-256(content)
 
-    O->>B: PUT /internal/v1/blobs/{digest}<br/>Bearer: caller's own token
+    O->>B: PutChunk (gRPC, client-streaming)<br/>header {contentHash, sizeBytes}, then data frames<br/>Authorization metadata: caller's own token
     B->>B: write to staging file, hashing as it goes
     B->>B: fsync
     B->>B: re-hash and compare to {digest}
     B->>B: atomic rename into b9/4d/{digest}
-    B-->>O: 201 {digest, sizeBytes}
+    B-->>O: PutChunkResponse {chunkId, contentHash, sizeBytes}
 
     O->>M: PUT /api/v1/buckets/photos/objects/hello.txt<br/>Bearer: caller's own token<br/>{sizeBytes, contentType, contentHash, userMetadata}
     M->>M: tenant = tenant_id claim
@@ -145,10 +145,10 @@ All errors are RFC 7807 problem details.
 | No or invalid token | 401 | Enforced before the controller |
 | Bucket does not exist | 404 | Metadata's 404 is translated; the blob may already be written |
 | Body exceeds `max-object-size` | 413 | Detected while buffering, before any downstream call |
-| Digest mismatch at the blob node | 502 | Blob node answers 400; the orchestrator reports it as a downstream failure, since the caller did nothing wrong |
-| Downstream 401 / 403 | 401 / 403 | Passed through — the caller's own token was rejected |
+| Digest mismatch at the blob node | 502 | Blob node answers `INVALID_ARGUMENT`; the orchestrator reports it as a downstream failure, since the caller did nothing wrong |
+| Downstream rejects the token | 401 / 403 | Passed through — HTTP 401/403 from metadata, `UNAUTHENTICATED`/`PERMISSION_DENIED` from the blob node |
 | Other downstream error status | 502 | `DownstreamServiceException` |
-| Blob node or metadata unreachable | 504 | `ResourceAccessException` — connection refused or timed out |
+| Blob node or metadata unreachable | 504 | `ResourceAccessException` for REST, `UNAVAILABLE`/`DEADLINE_EXCEEDED` for gRPC — both become `DownstreamUnavailableException` |
 
 The bucket-does-not-exist case is worth noting: because the blob write happens
 first, a 404 from metadata means the bytes are already on disk with nothing

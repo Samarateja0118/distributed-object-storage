@@ -24,9 +24,9 @@ sequenceDiagram
 
     Note over O: tenancy has now been enforced
 
-    O->>B: GET /internal/v1/blobs/{contentHash}<br/>Bearer: caller's own token
+    O->>B: GetChunk (gRPC, server-streaming) {contentHash}<br/>Authorization metadata: caller's own token
     B->>B: stat, then open the file at b9/4d/{digest}
-    B-->>O: 200 octet-stream
+    B-->>O: stream of GetChunkResponse data frames
 
     O-->>C: 200 bytes<br/>Content-Type from metadata<br/>ETag: "{etag}"<br/>X-Object-Version-Id<br/>x-dfs-meta-* for user metadata
 ```
@@ -122,10 +122,10 @@ server's empty `HEAD` response cannot be asserted in a MockMvc test.
 | No or invalid token | 401 | Enforced before the controller |
 | Key not found, or owned by another tenant | 404 | Indistinguishable by design |
 | Bucket not found | 404 | Same shape as a missing key |
-| Metadata references a missing blob | 404 | Logged with the digest; the halves have diverged |
-| Downstream 401 / 403 | 401 / 403 | Passed through |
+| Metadata references a missing blob | 404 | The blob node answers `NOT_FOUND`; logged with the digest, because the halves have diverged |
+| Downstream rejects the token | 401 / 403 | Passed through — HTTP 401/403 from metadata, `UNAUTHENTICATED`/`PERMISSION_DENIED` from the blob node |
 | Other downstream error status | 502 | `DownstreamServiceException` |
-| Metadata or blob node unreachable | 504 | `ResourceAccessException` |
+| Metadata or blob node unreachable | 504 | `ResourceAccessException` for REST, `UNAVAILABLE`/`DEADLINE_EXCEEDED` for gRPC |
 
 ## What Phase 1 does not do
 

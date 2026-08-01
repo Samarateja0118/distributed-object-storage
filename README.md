@@ -81,7 +81,7 @@ chooses to leave behind is documented in
 | Persistence | PostgreSQL, Spring Data JPA, Flyway migrations |
 | Caching | Redis |
 | Messaging | Kafka (Phase 3 onward) |
-| RPC | REST today; gRPC / Protobuf scaffolded for Phase 2 |
+| RPC | REST for the client API and metadata; gRPC / Protobuf for the byte path |
 | Testing | JUnit 5, Testcontainers, MockMvc, AssertJ |
 | Build | Maven multi-module |
 
@@ -117,7 +117,8 @@ mvn -pl dfs-blob-node           -am spring-boot:run   # :8090
 
 Wait for each to report `Started …Application` before running the sequence
 below. If a port is already taken, override it — `SERVER_PORT=18082` — and tell
-the orchestrator where to look with `METADATA_SERVICE_URL` or `BLOB_NODE_URL`.
+the orchestrator where to look with `METADATA_SERVICE_URL` or, for the blob
+node's gRPC port (`GRPC_PORT`, 9090 by default), `BLOB_GRPC_TARGET`.
 
 ```bash
 # Register a tenant
@@ -203,9 +204,10 @@ The reasoning behind the non-obvious choices is recorded as
 ## Testing
 
 Integration tests run against real dependencies rather than mocks — PostgreSQL
-and Redis in Testcontainers, and, for the orchestrator, an in-process HTTP
-stand-in for each downstream service so the assertions cover the actual wire
-contract. Tests are named `*IT` and run at `verify`:
+and Redis in Testcontainers, and, for the orchestrator, an in-process stand-in
+for each downstream service on the transport it really uses — gRPC for the blob
+node, HTTP for metadata — so the assertions cover the actual wire contract.
+Tests are named `*IT` and run at `verify`:
 
 ```bash
 mvn clean verify                                        # everything
@@ -218,14 +220,14 @@ mvn -pl dfs-metadata-service -am verify -Dit.test=BucketApiIT
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Auth, buckets, single-node object upload/download | ✅ Complete |
-| **2** | gRPC, chunking, multipart upload, multi-node distribution | Next |
+| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path done |
 | **3** | Replication, GC and refcounting, presigned URLs, encryption | Planned |
 | **4** | Observability, benchmarking, admin ops, multi-tenant scale | Planned |
 
-Two Phase 1 limits are deliberate rather than unfinished: the orchestrator
+Two current limits are deliberate rather than unfinished: the orchestrator
 buffers each object in memory, which is what lets the digest be computed before
-the first byte is sent (Phase 2 chunking removes it), and auth stops at login,
-JWT, and API keys — a `role` claim exists, but no per-bucket RBAC is enforced.
+the first byte is sent (chunking removes it), and auth stops at login, JWT, and
+API keys — a `role` claim exists, but no per-bucket RBAC is enforced.
 
 <!-- TODO: add a Screenshots section. Options that demo well:
      - a terminal recording of the upload/download round trip above
