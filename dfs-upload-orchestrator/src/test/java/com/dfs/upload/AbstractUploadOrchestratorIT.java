@@ -44,9 +44,12 @@ abstract class AbstractUploadOrchestratorIT {
     protected UUID tenantId;
 
     @DynamicPropertySource
-    static void downstreamUrls(DynamicPropertyRegistry registry) {
-        registry.add("dfs.upload.blob-base-url", DOWNSTREAM::baseUrl);
-        registry.add("dfs.upload.metadata-base-url", DOWNSTREAM::baseUrl);
+    static void downstreamAddresses(DynamicPropertyRegistry registry) {
+        // The channel is configured from this property, so pointing it at the
+        // in-process stub exercises the wiring production uses rather than a
+        // channel assembled for the test.
+        registry.add("dfs.upload.blob-grpc-target", DOWNSTREAM::blobGrpcTarget);
+        registry.add("dfs.upload.metadata-base-url", DOWNSTREAM::metadataBaseUrl);
     }
 
     @BeforeEach

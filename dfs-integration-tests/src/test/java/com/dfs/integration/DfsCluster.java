@@ -158,8 +158,12 @@ final class DfsCluster {
                 "BLOB_STORAGE_PATH", blobRoot.toString(),
                 "GRPC_PORT", String.valueOf(blobGrpcPort)));
 
+        // The byte path is gRPC and metadata is REST, so the orchestrator is
+        // pointed at two different addresses on two different transports. The
+        // blob node's HTTP port is still served, and still exercised directly by
+        // the tests, but the orchestrator no longer calls it.
         launch("dfs-upload-orchestrator", orchestratorPort, Map.of(
-                "BLOB_NODE_URL", blobUrl,
+                "BLOB_GRPC_TARGET", "static://localhost:" + blobGrpcPort,
                 "METADATA_SERVICE_URL", metadataUrl));
 
         awaitHealthy("dfs-auth-service", authUrl);
