@@ -13,7 +13,7 @@
     <artifactId>dfs-blob-node</artifactId>
     <packaging>jar</packaging>
 
-    <name>Distributed File Storage :: Blob Node</name>
+    <name>Distributed Object Storage :: Blob Node</name>
     <description>Data-plane chunk storage on local disk</description>
 
     <dependencies>

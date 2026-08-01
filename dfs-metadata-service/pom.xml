@@ -13,7 +13,7 @@
     <artifactId>dfs-metadata-service</artifactId>
     <packaging>jar</packaging>
 
-    <name>Distributed File Storage :: Metadata Service</name>
+    <name>Distributed Object Storage :: Metadata Service</name>
     <description>Control-plane metadata: buckets, objects, chunks, and placement maps</description>
 
     <dependencies>

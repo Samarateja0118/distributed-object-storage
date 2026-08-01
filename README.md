@@ -1,8 +1,17 @@
-# Distributed File Storage (DFS)
+# Distributed Object Storage Platform (S3-Inspired)
 
-A multi-tenant, S3-style object storage platform built with **Java 21** and **Spring Boot 3.3** — content-addressable blob storage, a metadata control plane, JWT-based tenant isolation, and an orchestration layer that keeps bytes and metadata consistent without a distributed transaction.
+A multi-tenant object storage platform built with **Java 21** and **Spring Boot 3.3**: objects are split into content-addressed chunks across a data plane, their metadata lives in a separate relational control plane, and tenancy is carried by a JWT claim rather than by anything the caller can set.
 
-[![CI](https://github.com/Samarateja0118/distributed-file-storage/actions/workflows/ci.yml/badge.svg)](https://github.com/Samarateja0118/distributed-file-storage/actions/workflows/ci.yml)
+[![CI](https://github.com/Samarateja0118/distributed-object-storage/actions/workflows/ci.yml/badge.svg)](https://github.com/Samarateja0118/distributed-object-storage/actions/workflows/ci.yml)
+
+The interesting problem here is not storing bytes. It is that no transaction spans the two halves of an object, so **every write has to choose which inconsistency it is willing to leave behind** — and that choice, not the code, is what the design is about. The reasoning behind each one is written down in [12 architecture decision records](docs/adr/README.md), costs included.
+
+**Worth a look if you're skimming:**
+
+- [Why writes go to the blob store first and reads go to metadata first](docs/adr/0006-blob-first-writes-metadata-first-reads.md) — consistency without a distributed transaction, and which failure mode that deliberately accepts
+- [Why an object's hash is not the hash of its bytes](docs/adr/0009-composite-digest-for-chunked-objects.md) — what chunking costs a client, stated plainly instead of discovered later
+- [Why the blob node has no DELETE endpoint](docs/adr/0004-no-delete-on-blob-node.md) — an apparent omission that is the whole point of deduplication
+- [Why the orchestrator has no service account](docs/adr/0007-forward-the-callers-token.md) — the caller's own token is forwarded, so tenancy cannot be laundered by an intermediary
 
 ## Why I built this
 
@@ -62,11 +71,12 @@ chooses to leave behind is documented in
 - User-defined object metadata
 - RFC 7807 problem details, with per-field validation errors
 
-**Content-addressable blob storage**
-- Blobs named by their SHA-256 digest and deduplicated across tenants
-- Content hashed while streaming; a body that does not match its digest is rejected before publication
-- Crash-safe writes — staged, fsynced, then atomically renamed, so a reader never observes a partial blob
+**Content-addressable chunk storage**
+- Chunks named by their SHA-256 digest and deduplicated across tenants — identical bytes are one stored copy, whoever uploads them
+- Content re-hashed while streaming; a body that does not match the digest it was filed under is rejected before publication
+- Crash-safe writes — staged, fsynced, then atomically renamed, so a reader never observes a partial chunk
 - Storage sharded two levels deep by digest prefix
+- Served over gRPC with streaming in both directions, so neither side holds a whole chunk on the wire
 
 **Upload orchestration**
 - Objects split into fixed-size chunks, stored independently and reassembled in order; one chunk is in memory at a time, in either direction

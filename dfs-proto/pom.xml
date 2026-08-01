@@ -13,7 +13,7 @@
     <artifactId>dfs-proto</artifactId>
     <packaging>jar</packaging>
 
-    <name>Distributed File Storage :: Proto</name>
+    <name>Distributed Object Storage :: Proto</name>
     <description>gRPC and Protobuf service contracts shared across DFS microservices</description>
 
     <dependencies>

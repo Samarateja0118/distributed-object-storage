@@ -13,7 +13,7 @@
     <artifactId>dfs-upload-orchestrator</artifactId>
     <packaging>jar</packaging>
 
-    <name>Distributed File Storage :: Upload Orchestrator</name>
+    <name>Distributed Object Storage :: Upload Orchestrator</name>
     <description>Upload/download orchestration, chunking, and multipart session management</description>
 
     <dependencies>
