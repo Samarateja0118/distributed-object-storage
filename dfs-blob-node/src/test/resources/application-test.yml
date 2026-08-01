@@ -3,10 +3,14 @@ spring:
     problemdetails:
       enabled: true
 
-# The gRPC server is not exercised by Phase 1 blob tests.
+# No network port in tests: the gRPC surface is exercised over the in-process
+# transport, which needs no free port and leaves nothing to clean up between
+# runs. Global interceptors still apply there, so authentication is exercised
+# for real rather than bypassed.
 grpc:
   server:
     port: -1
+    in-process-name: blob-node-test
 
 dfs:
   security:

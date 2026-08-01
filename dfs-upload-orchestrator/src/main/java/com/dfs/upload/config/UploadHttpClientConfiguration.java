@@ -8,26 +8,19 @@ import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 /**
- * One client per downstream service, each pinned to its base URL.
+ * The metadata service is the one dependency still reached over HTTP; the byte
+ * path moved to gRPC in Phase 2 (ADR 10), and this deliberately did not follow
+ * it — see {@link UploadGrpcClientConfiguration}.
  *
- * <p>Separate beans rather than one shared client so a base URL can never be
- * mixed up at the call site, and so the two can diverge later (timeouts,
- * retries) without either inheriting the other's settings.
+ * <p>A client pinned to its base URL rather than a shared one, so the URL cannot
+ * be mixed up at the call site.
  *
- * <p>Note what is deliberately absent: neither client carries a credential.
- * Authorization is attached per request from the caller's own token — see
+ * <p>Note what is deliberately absent: no credential. Authorization is attached
+ * per request from the caller's own token — see
  * {@link com.dfs.upload.domain.model.CallerToken}.
  */
 @Configuration
 public class UploadHttpClientConfiguration {
-
-    @Bean
-    RestClient blobClient(RestClient.Builder builder, UploadProperties properties) {
-        return builder.clone()
-                .baseUrl(properties.blobBaseUrl())
-                .requestFactory(requestFactory(properties))
-                .build();
-    }
 
     @Bean
     RestClient metadataClient(RestClient.Builder builder, UploadProperties properties) {

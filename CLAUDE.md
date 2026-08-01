@@ -67,6 +67,8 @@ Content and metadata live in different services, linked only by a SHA-256 hash:
 
 **PostgreSQL for metadata.** Buckets, objects, and versions are relational and carry invariants worth enforcing in the schema; the services use JPA over Flyway-managed migrations with `ddl-auto: validate`, so the schema is owned by migrations rather than inferred from entities.
 
+**One database per schema-owning service.** `dfs-auth-service`, `dfs-metadata-service`, and `dfs-admin-service` default to `dfs_auth`, `dfs_metadata`, and `dfs_admin`, created by `deploy/postgres/init-databases.sql` on first initialization of the Postgres volume. This is the "no service reaches into another's database" boundary made literal, and it is also load-bearing: each service ships its own `V1__` migration and its own default `flyway_schema_history`, so pointing two of them at one database means the second to start fails with a checksum mismatch on version 1 rather than applying its own schema. After editing that init script, recreate the volume with `docker compose -f deploy/docker-compose.yml down -v` — Postgres runs `docker-entrypoint-initdb.d` only on first init.
+
 **Clean Architecture.** The services are meant to be extracted and scaled independently in later phases. Keeping transport and persistence out of the domain is what makes that a refactor rather than a rewrite.
 
 ## Coding conventions
@@ -122,15 +124,15 @@ mvn clean verify -DargLine="-Dapi.version=1.44"
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Auth, buckets, single-node object upload/download | ✅ Complete |
-| **2** | gRPC, chunking, multipart upload, multi-node distribution | Next |
+| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path done |
 | **3** | Replication, GC, blob refcounting, presigned URLs, encryption | Planned |
 | **4** | Observability, benchmarking, admin ops, multi-tenant scale | Planned |
 
 Phase 1 delivered the auth service, metadata service, blob node, and upload orchestrator, all covered by integration tests.
 
-Two Phase 1 scoping decisions hold unless the repository owner changes them:
+Two scoping decisions hold unless the repository owner changes them:
 
-1. The orchestrator talks to the blob node over **REST, not gRPC** — gRPC is Phase 2. The `blobGrpcTarget` / `metadataGrpcTarget` properties and `blob.proto` are scaffolding for that phase and are deliberately unused.
+1. gRPC carries the **byte path only** — the orchestrator's calls to the blob node. The metadata service and the client-facing API stay REST ([ADR 10](docs/adr/0010-grpc-for-the-byte-path.md)), and `metadataGrpcTarget` remains unused scaffolding. The blob node's REST endpoints also stay until the gRPC path has proven itself; `ObjectLifecycleE2EIT.refusesUnauthenticatedBlobReads` is coupled to them and needs a gRPC equivalent when they go.
 2. Auth is **login, JWT, and API keys — not full RBAC**. A `role` claim exists (OWNER/MEMBER) but nothing enforces per-bucket permissions.
 
-Phase 1 also buffers each upload in memory, bounded by `dfs.upload.max-object-size`, which is what allows the digest to be computed before the first byte is sent. Phase 2's chunked path removes that constraint.
+Uploads are still buffered whole in memory, bounded by `dfs.upload.max-object-size`, which is what allows the digest to be computed before the first byte is sent. One blob is still one chunk; Phase 2's chunked path removes that constraint.

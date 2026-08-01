@@ -21,8 +21,12 @@ spring:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
+# No business HTTP API: this service is driven by Kafka and by its own schedule.
+# Disabling the main port keeps that literal — there is no port on which a request
+# handler could be added without making this decision again. Actuator moves to its
+# own port below, which is the only reason a servlet container is on the classpath.
 server:
-  port: ${SERVER_PORT:8085}
+  port: -1
 
 dfs:
   service-name: gc
@@ -34,6 +38,8 @@ dfs:
     object-deleted-topic: dfs.object.deleted
 
 management:
+  server:
+    port: ${MANAGEMENT_PORT:8085}
   endpoints:
     web:
       exposure:

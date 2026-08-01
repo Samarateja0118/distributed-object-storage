@@ -1,7 +1,7 @@
 # 5. REST between orchestrator and blob node in Phase 1
 
 Date: 2026-07-30
-Status: Accepted
+Status: Superseded by [ADR 10](0010-grpc-for-the-byte-path.md)
 
 ## Context
 

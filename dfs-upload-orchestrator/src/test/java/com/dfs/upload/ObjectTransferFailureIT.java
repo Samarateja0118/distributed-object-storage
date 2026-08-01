@@ -1,6 +1,7 @@
 package com.dfs.upload;
 
 import com.dfs.common.hash.Sha256;
+import io.grpc.Status;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -27,7 +28,7 @@ class ObjectTransferFailureIT extends AbstractUploadOrchestratorIT {
     @Test
     @DisplayName("a failed blob write leaves no metadata behind, so no object points at missing bytes")
     void blobFailureDoesNotRegisterMetadata() throws Exception {
-        DOWNSTREAM.failBlobWith(500);
+        DOWNSTREAM.failBlobWith(Status.INTERNAL);
 
         mockMvc.perform(put("/api/v1/buckets/photos/objects/fox.txt")
                         .header(HttpHeaders.AUTHORIZATION, bearer())
@@ -76,10 +77,9 @@ class ObjectTransferFailureIT extends AbstractUploadOrchestratorIT {
                         .content(CONTENT))
                 .andExpect(status().isCreated());
 
-        assertThat(DOWNSTREAM.blobRequests())
+        assertThat(DOWNSTREAM.blobCalls())
                 .hasSize(2)
-                .allSatisfy(request -> assertThat(request.path())
-                        .isEqualTo("/internal/v1/blobs/" + Sha256.hexOfContent(CONTENT)));
+                .allSatisfy(call -> assertThat(call.digest()).isEqualTo(Sha256.hexOfContent(CONTENT)));
     }
 
     @Test
@@ -104,7 +104,7 @@ class ObjectTransferFailureIT extends AbstractUploadOrchestratorIT {
     @Test
     @DisplayName("a downstream rejection of the caller's token surfaces as 401, not as a gateway error")
     void downstreamAuthFailureSurfacesAsUnauthorized() throws Exception {
-        DOWNSTREAM.failBlobWith(401);
+        DOWNSTREAM.failBlobWith(Status.UNAUTHENTICATED);
 
         mockMvc.perform(put("/api/v1/buckets/photos/objects/fox.txt")
                         .header(HttpHeaders.AUTHORIZATION, bearer())

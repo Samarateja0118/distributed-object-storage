@@ -1,6 +1,7 @@
 package com.dfs.upload.api.rest;
 
 import com.dfs.upload.domain.exception.DownstreamServiceException;
+import com.dfs.upload.domain.exception.DownstreamUnavailableException;
 import com.dfs.upload.domain.exception.ObjectNotFoundException;
 import com.dfs.upload.domain.exception.ObjectTooLargeException;
 import org.slf4j.Logger;
@@ -66,10 +67,12 @@ class UploadExceptionHandler {
 
     /**
      * The downstream service never answered at all — connection refused, or the
-     * timeout elapsed.
+     * timeout elapsed. Two exception types for one condition, because the two
+     * transports report it differently: the REST client raises Spring's, and
+     * gRPC has no equivalent to catch, so the blob adapter raises the other.
      */
-    @ExceptionHandler(ResourceAccessException.class)
-    ProblemDetail handleUnreachable(ResourceAccessException exception) {
+    @ExceptionHandler({ResourceAccessException.class, DownstreamUnavailableException.class})
+    ProblemDetail handleUnreachable(Exception exception) {
         log.error("Downstream service unreachable", exception);
         return problem(HttpStatus.GATEWAY_TIMEOUT, "Upstream service unreachable",
                 "A storage service did not respond in time", "downstream-unreachable");

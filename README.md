@@ -2,7 +2,7 @@
 
 A multi-tenant, S3-style object storage platform built with **Java 21** and **Spring Boot 3.3** — content-addressable blob storage, a metadata control plane, JWT-based tenant isolation, and an orchestration layer that keeps bytes and metadata consistent without a distributed transaction.
 
-<!-- TODO: add a CI build-status badge once a workflow is wired up. -->
+[![CI](https://github.com/Samarateja0118/distributed-file-storage/actions/workflows/ci.yml/badge.svg)](https://github.com/Samarateja0118/distributed-file-storage/actions/workflows/ci.yml)
 
 ## Why I built this
 
@@ -81,7 +81,7 @@ chooses to leave behind is documented in
 | Persistence | PostgreSQL, Spring Data JPA, Flyway migrations |
 | Caching | Redis |
 | Messaging | Kafka (Phase 3 onward) |
-| RPC | REST today; gRPC / Protobuf scaffolded for Phase 2 |
+| RPC | REST for the client API and metadata; gRPC / Protobuf for the byte path |
 | Testing | JUnit 5, Testcontainers, MockMvc, AssertJ |
 | Build | Maven multi-module |
 
@@ -105,6 +105,21 @@ configuration — see [CLAUDE.md](CLAUDE.md#container-runtime).
 
 ### A round trip
 
+The round trip crosses four services, so all four have to be running — each in
+its own terminal, since `spring-boot:run` stays in the foreground:
+
+```bash
+mvn -pl dfs-auth-service        -am spring-boot:run   # :8081
+mvn -pl dfs-metadata-service    -am spring-boot:run   # :8082
+mvn -pl dfs-upload-orchestrator -am spring-boot:run   # :8083
+mvn -pl dfs-blob-node           -am spring-boot:run   # :8090
+```
+
+Wait for each to report `Started …Application` before running the sequence
+below. If a port is already taken, override it — `SERVER_PORT=18082` — and tell
+the orchestrator where to look with `METADATA_SERVICE_URL` or, for the blob
+node's gRPC port (`GRPC_PORT`, 9090 by default), `BLOB_GRPC_TARGET`.
+
 ```bash
 # Register a tenant
 curl -sX POST localhost:8081/api/v1/tenants \
@@ -123,22 +138,30 @@ TOKEN=$(curl -sX POST localhost:8081/api/v1/auth/login \
   | jq -r .accessToken)
 
 # Create a bucket
-curl -X PUT localhost:8082/api/v1/buckets/photos \
+curl -sX PUT localhost:8082/api/v1/buckets/photos \
   -H "Authorization: Bearer $TOKEN"
+# → 201 {"id":"…","name":"photos","versioningEnabled":false,"defaultEncryption":"NONE",…}
 
 # Upload an object — hashed, stored, then registered
-curl -X PUT localhost:8083/api/v1/buckets/photos/objects/hello.txt \
+curl -sX PUT localhost:8083/api/v1/buckets/photos/objects/hello.txt \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: text/plain' \
   --data-binary 'hello world'
+# → 201 {"key":"hello.txt","versionId":"…","sizeBytes":11,"contentType":"text/plain",
+#        "contentHash":"b94d27b9…cde9","etag":"b94d27b9…cde9","userMetadata":{}}
 
-# Read it back
-curl localhost:8083/api/v1/buckets/photos/objects/hello.txt \
+# Read it back — the bytes, with the digest as ETag
+curl -i localhost:8083/api/v1/buckets/photos/objects/hello.txt \
   -H "Authorization: Bearer $TOKEN"
+# → 200, ETag: "b94d27b9…cde9", X-Object-Version-Id: …, body: hello world
 ```
 
-Uploading identical bytes under a second key stores one blob, not two — the
-digest in the upload response is the same both times.
+Uploading the same bytes under a second key stores one blob, not two — the
+`contentHash` in both upload responses is the same, and only one file appears
+under `blob-data/`. That holds across tenants as well as across keys: the blob
+is shared, while a second tenant asking for the first tenant's key still gets a
+404, because tenancy is enforced on the metadata pointer rather than on the
+bytes.
 
 ## Services
 
@@ -158,6 +181,13 @@ four are scaffolds that boot and expose health endpoints, pending their phase.
 Every service uses the same hexagonal layout — see
 [ADR 1](docs/adr/0001-clean-architecture.md).
 
+## Documentation
+
+- [Architecture](docs/architecture.md) — service map, the two cross-cutting contracts, layering, persistence
+- [Upload sequence](docs/upload-sequence.md) — blob first, metadata second, and what a partial failure leaves behind
+- [Download sequence](docs/download-sequence.md) — metadata first, because a digest has no owner
+- [Data model](docs/erd.md) — the tables, from the Flyway migrations
+
 ## Design decisions
 
 The reasoning behind the non-obvious choices is recorded as
@@ -167,16 +197,25 @@ The reasoning behind the non-obvious choices is recorded as
 - [One shared token contract](docs/adr/0002-shared-token-contract.md) — why four services share a single decoder
 - [Content-addressable storage](docs/adr/0003-content-addressable-storage.md) — why blobs are named by their own hash
 - [No DELETE on the blob node](docs/adr/0004-no-delete-on-blob-node.md) — why an apparent omission is deliberate
-- [REST before gRPC](docs/adr/0005-rest-before-grpc.md)
+- [REST before gRPC](docs/adr/0005-rest-before-grpc.md) — superseded by ADR 10, kept for the reasoning
 - [Blob-first writes, metadata-first reads](docs/adr/0006-blob-first-writes-metadata-first-reads.md) — consistency without a distributed transaction
 - [Forwarding the caller's token](docs/adr/0007-forward-the-callers-token.md) — why there is no service account
+
+Phase 2 adds five more:
+
+- [An object is an ordered list of chunks](docs/adr/0008-objects-are-ordered-lists-of-chunks.md) — why metadata owns the chunk list
+- [A composite digest for chunked objects](docs/adr/0009-composite-digest-for-chunked-objects.md) — what `contentHash` means once an object is not one blob
+- [gRPC for the byte path](docs/adr/0010-grpc-for-the-byte-path.md) — and REST everywhere else
+- [Chunk placement is recorded, not recomputed](docs/adr/0011-chunk-placement-is-recorded-not-recomputed.md) — why the map is stored rather than derived
+- [S3-style multipart upload](docs/adr/0012-s3-style-multipart-upload.md) — with server-side sessions
 
 ## Testing
 
 Integration tests run against real dependencies rather than mocks — PostgreSQL
-and Redis in Testcontainers, and, for the orchestrator, an in-process HTTP
-stand-in for each downstream service so the assertions cover the actual wire
-contract. Tests are named `*IT` and run at `verify`:
+and Redis in Testcontainers, and, for the orchestrator, an in-process stand-in
+for each downstream service on the transport it really uses — gRPC for the blob
+node, HTTP for metadata — so the assertions cover the actual wire contract.
+Tests are named `*IT` and run at `verify`:
 
 ```bash
 mvn clean verify                                        # everything
@@ -189,14 +228,14 @@ mvn -pl dfs-metadata-service -am verify -Dit.test=BucketApiIT
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Auth, buckets, single-node object upload/download | ✅ Complete |
-| **2** | gRPC, chunking, multipart upload, multi-node distribution | Next |
+| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path done |
 | **3** | Replication, GC and refcounting, presigned URLs, encryption | Planned |
 | **4** | Observability, benchmarking, admin ops, multi-tenant scale | Planned |
 
-Two Phase 1 limits are deliberate rather than unfinished: the orchestrator
+Two current limits are deliberate rather than unfinished: the orchestrator
 buffers each object in memory, which is what lets the digest be computed before
-the first byte is sent (Phase 2 chunking removes it), and auth stops at login,
-JWT, and API keys — a `role` claim exists, but no per-bucket RBAC is enforced.
+the first byte is sent (chunking removes it), and auth stops at login, JWT, and
+API keys — a `role` claim exists, but no per-bucket RBAC is enforced.
 
 <!-- TODO: add a Screenshots section. Options that demo well:
      - a terminal recording of the upload/download round trip above

@@ -8,20 +8,52 @@ option java_multiple_files = true;
 option java_package = "com.dfs.proto.blob.v1";
 option java_outer_classname = "BlobProto";
 
-// Internal blob node contract (implementation deferred).
+// The blob node's internal contract. Chunks are content-addressed: a chunk is
+// named by the lowercase-hex SHA-256 of its own bytes and nothing else, so no
+// tenant appears anywhere in this file. Identical bytes from two tenants are one
+// chunk (ADR 3).
+//
+// There is deliberately no DeleteChunk. A deduplicated chunk has no single owner
+// to authorize a delete against, so reclamation is refcounted and belongs to GC
+// (ADR 4). A generated stub is not a decision, but it reads like permission —
+// leaving one here would invite the thing ADR 4 exists to prevent.
 service BlobNodeService {
-  rpc PutChunk(PutChunkRequest) returns (PutChunkResponse);
-  rpc GetChunk(GetChunkRequest) returns (GetChunkResponse);
-  rpc DeleteChunk(DeleteChunkRequest) returns (DeleteChunkResponse);
+  // Streaming rather than unary so neither side has to hold a whole chunk in
+  // memory: a unary `bytes` field would reproduce Phase 1's memory bound one
+  // level down, which is the constraint chunking exists to remove (ADR 8).
+  rpc PutChunk(stream PutChunkRequest) returns (PutChunkResponse);
+
+  rpc GetChunk(GetChunkRequest) returns (stream GetChunkResponse);
+
+  // Lets the orchestrator skip re-sending bytes the cluster already holds, which
+  // is what makes chunk-level deduplication pay rather than merely save disk.
+  rpc ChunkExists(ChunkExistsRequest) returns (ChunkExistsResponse);
 }
 
+// A header frame followed by data frames. The digest arrives before any content
+// so the node can hash as it writes and reject a body that does not match the
+// name it was filed under, rather than buffering the whole chunk to compare
+// afterwards.
 message PutChunkRequest {
-  string content_hash = 1;
-  bytes data = 2;
+  oneof payload {
+    PutChunkHeader header = 1;
+    bytes data = 2;
+  }
 }
 
+message PutChunkHeader {
+  string content_hash = 1;
+  int64 size_bytes = 2;
+}
+
+// Deliberately does not report whether the write deduplicated against bytes the
+// node already held. The node cannot answer that without a stat before every
+// write, which would be both an extra syscall and a lie under concurrency, and
+// nothing needs the answer: the call is idempotent either way.
 message PutChunkResponse {
   dfs.common.v1.ChunkId chunk_id = 1;
+  string content_hash = 2;
+  int64 size_bytes = 3;
 }
 
 message GetChunkRequest {
@@ -32,8 +64,12 @@ message GetChunkResponse {
   bytes data = 1;
 }
 
-message DeleteChunkRequest {
+message ChunkExistsRequest {
   string content_hash = 1;
 }
 
-message DeleteChunkResponse {}
+message ChunkExistsResponse {
+  bool exists = 1;
+  // Zero when the chunk is absent.
+  int64 size_bytes = 2;
+}

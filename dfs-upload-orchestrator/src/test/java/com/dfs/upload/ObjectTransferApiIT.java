@@ -33,10 +33,10 @@ class ObjectTransferApiIT extends AbstractUploadOrchestratorIT {
                 .andExpect(jsonPath("$.sizeBytes").value(CONTENT.length))
                 .andExpect(jsonPath("$.key").value("fox.txt"));
 
-        var blobRequest = DOWNSTREAM.blobRequests().getFirst();
-        assertThat(blobRequest.method()).isEqualTo("PUT");
-        assertThat(blobRequest.path()).isEqualTo("/internal/v1/blobs/" + CONTENT_DIGEST);
-        assertThat(blobRequest.body()).isEqualTo(CONTENT);
+        var blobCall = DOWNSTREAM.blobCalls().getFirst();
+        assertThat(blobCall.operation()).isEqualTo("PutChunk");
+        assertThat(blobCall.digest()).isEqualTo(CONTENT_DIGEST);
+        assertThat(blobCall.content()).isEqualTo(CONTENT);
 
         var metadataRequest = DOWNSTREAM.metadataRequests().getFirst();
         assertThat(metadataRequest.method()).isEqualTo("PUT");
@@ -57,13 +57,12 @@ class ObjectTransferApiIT extends AbstractUploadOrchestratorIT {
                         .content(CONTENT))
                 .andExpect(status().isCreated());
 
-        var blobRequest = DOWNSTREAM.blobRequests().getFirst();
-        String digestInPath = blobRequest.path().substring("/internal/v1/blobs/".length());
-        assertThat(digestInPath).isEqualTo(Sha256.hexOfContent(blobRequest.body()));
+        var blobCall = DOWNSTREAM.blobCalls().getFirst();
+        assertThat(blobCall.digest()).isEqualTo(Sha256.hexOfContent(blobCall.content()));
     }
 
     @Test
-    @DisplayName("forwards the caller's own token to both services, unchanged")
+    @DisplayName("forwards the caller's own token to both services, unchanged, on either transport")
     void forwardsCallerTokenToBothServices() throws Exception {
         String callerToken = bearer();
 
@@ -72,7 +71,9 @@ class ObjectTransferApiIT extends AbstractUploadOrchestratorIT {
                         .content(CONTENT))
                 .andExpect(status().isCreated());
 
-        assertThat(DOWNSTREAM.blobRequests().getFirst().authorization()).isEqualTo(callerToken);
+        // gRPC metadata for the blob node, an HTTP header for the metadata
+        // service; the same string reaches both.
+        assertThat(DOWNSTREAM.blobCalls().getFirst().authorization()).isEqualTo(callerToken);
         assertThat(DOWNSTREAM.metadataRequests().getFirst().authorization()).isEqualTo(callerToken);
     }
 
@@ -147,10 +148,9 @@ class ObjectTransferApiIT extends AbstractUploadOrchestratorIT {
                     .andExpect(status().isCreated());
         }
 
-        assertThat(DOWNSTREAM.blobRequests())
+        assertThat(DOWNSTREAM.blobCalls())
                 .hasSize(2)
-                .allSatisfy(request ->
-                        assertThat(request.path()).isEqualTo("/internal/v1/blobs/" + CONTENT_DIGEST));
+                .allSatisfy(call -> assertThat(call.digest()).isEqualTo(CONTENT_DIGEST));
     }
 
     @Test
@@ -175,7 +175,7 @@ class ObjectTransferApiIT extends AbstractUploadOrchestratorIT {
         mockMvc.perform(put("/api/v1/buckets/photos/objects/fox.txt").content(CONTENT))
                 .andExpect(status().isUnauthorized());
 
-        assertThat(DOWNSTREAM.blobRequests()).isEmpty();
+        assertThat(DOWNSTREAM.blobCalls()).isEmpty();
         assertThat(DOWNSTREAM.metadataRequests()).isEmpty();
     }
 
@@ -189,7 +189,7 @@ class ObjectTransferApiIT extends AbstractUploadOrchestratorIT {
                         .content(tooLarge))
                 .andExpect(status().isPayloadTooLarge());
 
-        assertThat(DOWNSTREAM.blobRequests()).isEmpty();
+        assertThat(DOWNSTREAM.blobCalls()).isEmpty();
         assertThat(DOWNSTREAM.metadataRequests()).isEmpty();
     }
 }
