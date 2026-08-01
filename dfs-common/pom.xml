@@ -61,6 +61,15 @@
             <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Same arrangement for the gRPC entry point: a servlet filter chain never
+             sees a gRPC call, so the shared decoder has to be applied a second time
+             by an interceptor. Optional, with its configuration conditional on this
+             starter, so services with no gRPC surface do not pay for it. -->
+        <dependency>
+            <groupId>net.devh</groupId>
+            <artifactId>grpc-server-spring-boot-starter</artifactId>
+            <optional>true</optional>
+        </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-tracing-bridge-otel</artifactId>
