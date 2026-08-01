@@ -4,6 +4,7 @@ import com.dfs.upload.domain.model.CallerToken;
 import com.dfs.upload.domain.model.ObjectDownload;
 import com.dfs.upload.domain.model.RegisteredObject;
 
+import java.io.InputStream;
 import java.util.Map;
 
 /**
@@ -17,10 +18,16 @@ public interface ObjectTransferUseCase {
 
     ObjectDownload download(DownloadQuery query);
 
+    /**
+     * @param content the object's bytes, consumed as they arrive. A stream
+     *                rather than an array because the point of chunking is that
+     *                the whole object never has to be in memory at once (ADR 8);
+     *                its length is therefore not known until it has been read.
+     */
     record UploadCommand(
             String bucketName,
             String objectKey,
-            byte[] content,
+            InputStream content,
             String contentType,
             Map<String, String> userMetadata,
             CallerToken token) {

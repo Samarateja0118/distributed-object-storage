@@ -70,6 +70,9 @@ final class DownstreamStub {
     private final Map<String, byte[]> blobs = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> objects = new ConcurrentHashMap<>();
 
+    /** Chunk lists, keyed like {@link #objects} and served from their own path. */
+    private final Map<String, List<Map<String, Object>>> objectChunks = new ConcurrentHashMap<>();
+
     private volatile Status blobFailure;
     private volatile int metadataFailureStatus;
 
@@ -102,6 +105,7 @@ final class DownstreamStub {
         metadataRequests.clear();
         blobs.clear();
         objects.clear();
+        objectChunks.clear();
         blobFailure = null;
         metadataFailureStatus = 0;
     }
@@ -115,9 +119,10 @@ final class DownstreamStub {
         metadataFailureStatus = status;
     }
 
-    /** Pre-loads metadata pointing at a digest the blob node does not have. */
+    /** Pre-loads metadata pointing at a chunk the blob node does not have. */
     void registerDanglingObject(String bucket, String key, String digest) {
         objects.put(bucket + "/" + key, objectRecord(key, digest, 12, "text/plain", Map.of()));
+        objectChunks.put(bucket + "/" + key, List.of(chunkRecord(0, digest, 12)));
     }
 
     /**
@@ -127,6 +132,7 @@ final class DownstreamStub {
     void registerObjectWithoutContentType(String bucket, String key, String digest, byte[] content) {
         blobs.put(digest, content);
         objects.put(bucket + "/" + key, objectRecord(key, digest, content.length, null, Map.of()));
+        objectChunks.put(bucket + "/" + key, List.of(chunkRecord(0, digest, content.length)));
     }
 
     List<BlobCall> blobCalls() {
@@ -251,16 +257,28 @@ final class DownstreamStub {
             return;
         }
 
-        // /api/v1/buckets/{bucket}/objects/{key...}
+        // /api/v1/buckets/{bucket}/objects/{key...}, or the chunk list beside it.
         String path = URLDecoder.decode(exchange.getRequestURI().getPath(), StandardCharsets.UTF_8);
         String remainder = path.substring("/api/v1/buckets/".length());
-        int objectsAt = remainder.indexOf("/objects/");
-        if (objectsAt < 0) {
+        boolean chunksRequest = remainder.contains("/object-chunks/");
+        String separator = chunksRequest ? "/object-chunks/" : "/objects/";
+        int separatorAt = remainder.indexOf(separator);
+        if (separatorAt < 0) {
             respond(exchange, 404, new byte[0]);
             return;
         }
-        String bucket = remainder.substring(0, objectsAt);
-        String key = remainder.substring(objectsAt + "/objects/".length());
+        String bucket = remainder.substring(0, separatorAt);
+        String key = remainder.substring(separatorAt + separator.length());
+
+        if (chunksRequest) {
+            List<Map<String, Object>> chunks = objectChunks.get(bucket + "/" + key);
+            if (chunks == null) {
+                respond(exchange, 404, "{\"detail\":\"no such object\"}".getBytes(StandardCharsets.UTF_8));
+            } else {
+                respondJson(exchange, 200, Map.of("chunks", chunks));
+            }
+            return;
+        }
 
         switch (exchange.getRequestMethod()) {
             case "PUT" -> {
@@ -272,6 +290,10 @@ final class DownstreamStub {
                         (String) request.get("contentType"),
                         (Map<String, String>) request.getOrDefault("userMetadata", Map.of()));
                 objects.put(bucket + "/" + key, stored);
+                // Kept verbatim, so a download reads back exactly the list the
+                // orchestrator sent rather than one this stub reconstructed.
+                objectChunks.put(bucket + "/" + key,
+                        (List<Map<String, Object>>) request.getOrDefault("chunks", List.of()));
                 respondJson(exchange, 201, stored);
             }
             case "GET" -> {
@@ -302,6 +324,15 @@ final class DownstreamStub {
         // present so the tests would catch it starting to depend on them.
         record.put("id", UUID.randomUUID().toString());
         record.put("latest", true);
+        return record;
+    }
+
+    private static Map<String, Object> chunkRecord(int index, String digest, long sizeBytes) {
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("index", index);
+        record.put("digest", digest);
+        record.put("sizeBytes", sizeBytes);
+        record.put("nodeId", "blob-node-0");
         return record;
     }
 
