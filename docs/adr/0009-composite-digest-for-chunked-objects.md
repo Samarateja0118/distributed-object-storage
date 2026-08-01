@@ -56,6 +56,13 @@ distinguishes them beyond age. The alternative — rewriting historical digests 
 the composite form — was rejected because it would silently invalidate any ETag a
 client had already stored.
 
+**One test changed sides.** `ObjectLifecycleE2EIT` asserted that an uploaded
+object's `contentHash` equalled the SHA-256 of its content — the very identity
+this record breaks. It now asserts the two differ, and looks for the file on disk
+under the chunk's digest rather than the object's. Recorded because an assertion
+that inverts is easy to mistake for one that was simply wrong, and because it is
+the cheapest place a client-visible break of this kind would have been caught.
+
 The S3-style split was rejected for a narrower reason: it puts two kinds of value
 in one column and adds a branch to every comparison, and the discipline of one
 rule was judged more valuable than matching S3's exact bytes here.
