@@ -197,9 +197,17 @@ The reasoning behind the non-obvious choices is recorded as
 - [One shared token contract](docs/adr/0002-shared-token-contract.md) — why four services share a single decoder
 - [Content-addressable storage](docs/adr/0003-content-addressable-storage.md) — why blobs are named by their own hash
 - [No DELETE on the blob node](docs/adr/0004-no-delete-on-blob-node.md) — why an apparent omission is deliberate
-- [REST before gRPC](docs/adr/0005-rest-before-grpc.md)
+- [REST before gRPC](docs/adr/0005-rest-before-grpc.md) — superseded by ADR 10, kept for the reasoning
 - [Blob-first writes, metadata-first reads](docs/adr/0006-blob-first-writes-metadata-first-reads.md) — consistency without a distributed transaction
 - [Forwarding the caller's token](docs/adr/0007-forward-the-callers-token.md) — why there is no service account
+
+Phase 2 adds five more:
+
+- [An object is an ordered list of chunks](docs/adr/0008-objects-are-ordered-lists-of-chunks.md) — why metadata owns the chunk list
+- [A composite digest for chunked objects](docs/adr/0009-composite-digest-for-chunked-objects.md) — what `contentHash` means once an object is not one blob
+- [gRPC for the byte path](docs/adr/0010-grpc-for-the-byte-path.md) — and REST everywhere else
+- [Chunk placement is recorded, not recomputed](docs/adr/0011-chunk-placement-is-recorded-not-recomputed.md) — why the map is stored rather than derived
+- [S3-style multipart upload](docs/adr/0012-s3-style-multipart-upload.md) — with server-side sessions
 
 ## Testing
 

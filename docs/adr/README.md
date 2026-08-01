@@ -14,7 +14,7 @@ believed and when is the useful part.
 | [2](0002-shared-token-contract.md) | One shared token contract in `dfs-common` | Accepted |
 | [3](0003-content-addressable-storage.md) | Content-addressable blob storage with SHA-256 | Accepted |
 | [4](0004-no-delete-on-blob-node.md) | The blob node has no DELETE endpoint | Accepted |
-| [5](0005-rest-before-grpc.md) | REST between orchestrator and blob node in Phase 1 | Accepted |
+| [5](0005-rest-before-grpc.md) | REST between orchestrator and blob node in Phase 1 | Superseded by [10](0010-grpc-for-the-byte-path.md) |
 | [6](0006-blob-first-writes-metadata-first-reads.md) | Blob-first writes, metadata-first reads | Accepted |
 | [7](0007-forward-the-callers-token.md) | The orchestrator forwards the caller's token | Accepted |
 | [8](0008-objects-are-ordered-lists-of-chunks.md) | An object is an ordered list of chunks, owned by metadata | Accepted |
