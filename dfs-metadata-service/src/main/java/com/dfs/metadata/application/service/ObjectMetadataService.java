@@ -3,12 +3,14 @@ package com.dfs.metadata.application.service;
 import com.dfs.metadata.application.port.PageResult;
 import com.dfs.metadata.application.port.in.ObjectMetadataUseCase;
 import com.dfs.metadata.application.port.out.BucketRepositoryPort;
+import com.dfs.metadata.application.port.out.ObjectChunkRepositoryPort;
 import com.dfs.metadata.application.port.out.ObjectMetadataRepositoryPort;
 import com.dfs.metadata.domain.exception.BucketNotFoundException;
 import com.dfs.metadata.domain.exception.ObjectNotFoundException;
 import com.dfs.metadata.domain.model.Bucket;
 import com.dfs.metadata.domain.model.BucketName;
 import com.dfs.metadata.domain.model.ContentHash;
+import com.dfs.metadata.domain.model.ObjectChunks;
 import com.dfs.metadata.domain.model.ObjectKey;
 import com.dfs.metadata.domain.model.StorageObject;
 import org.springframework.stereotype.Service;
@@ -25,44 +27,76 @@ import java.util.UUID;
 public class ObjectMetadataService implements ObjectMetadataUseCase {
 
     private final ObjectMetadataRepositoryPort objectRepository;
+    private final ObjectChunkRepositoryPort chunkRepository;
     private final BucketRepositoryPort bucketRepository;
     private final Clock clock;
 
     public ObjectMetadataService(
             ObjectMetadataRepositoryPort objectRepository,
+            ObjectChunkRepositoryPort chunkRepository,
             BucketRepositoryPort bucketRepository,
             Clock clock) {
         this.objectRepository = objectRepository;
+        this.chunkRepository = chunkRepository;
         this.bucketRepository = bucketRepository;
         this.clock = clock;
     }
 
+    /**
+     * Records an object and the chunk list making up its content.
+     *
+     * <p>The list is checked against the declared hash and size before anything
+     * is written. Rejecting here costs one hash of a few hundred bytes; accepting
+     * a list that does not describe the content would produce an object that
+     * reads back as something other than what was uploaded, and nothing
+     * downstream recomputes the digest to notice.
+     */
     @Override
     public StorageObject putObject(PutObjectCommand command) {
         Bucket bucket = requireBucket(command.tenantId(), command.bucketName());
         ObjectKey key = new ObjectKey(command.objectKey());
         ContentHash hash = new ContentHash(command.contentHash());
+        ObjectChunks chunks = new ObjectChunks(command.chunks());
+        chunks.requireConsistentWith(hash, command.sizeBytes());
         Instant now = Instant.now(clock);
 
         Optional<StorageObject> current = objectRepository.findCurrentVersion(bucket.id(), key);
         if (current.isEmpty()) {
-            return objectRepository.save(StorageObject.create(
+            return saveWithChunks(StorageObject.create(
                     bucket.id(), key, command.sizeBytes(), command.contentType(), hash,
-                    command.userMetadata(), now));
+                    command.userMetadata(), now), chunks);
         }
 
         StorageObject existing = current.get();
         if (!bucket.versioningEnabled()) {
-            return objectRepository.save(existing.replaceContent(
-                    command.sizeBytes(), command.contentType(), hash, command.userMetadata(), now));
+            return saveWithChunks(existing.replaceContent(
+                    command.sizeBytes(), command.contentType(), hash, command.userMetadata(), now), chunks);
         }
 
         // The unique index permits only one current version per key, so the
         // predecessor must be demoted before the new version is inserted.
         objectRepository.demoteCurrentVersion(bucket.id(), key);
-        return objectRepository.save(StorageObject.create(
+        return saveWithChunks(StorageObject.create(
                 bucket.id(), key, command.sizeBytes(), command.contentType(), hash,
-                command.userMetadata(), now));
+                command.userMetadata(), now), chunks);
+    }
+
+    /**
+     * Both writes share the caller's transaction, so an object never becomes
+     * visible without the chunk list saying where its content is.
+     */
+    private StorageObject saveWithChunks(StorageObject object, ObjectChunks chunks) {
+        StorageObject saved = objectRepository.save(object);
+        chunkRepository.replaceChunks(saved.id(), chunks);
+        return saved;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ObjectChunks getObjectChunks(UUID tenantId, String bucketName, String objectKey) {
+        Bucket bucket = requireBucket(tenantId, bucketName);
+        StorageObject object = requireCurrentVersion(bucket, new ObjectKey(objectKey));
+        return chunkRepository.findChunks(object.id());
     }
 
     @Override

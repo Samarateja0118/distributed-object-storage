@@ -1,7 +1,9 @@
 package com.dfs.metadata;
 
+import com.dfs.common.hash.Sha256;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -160,7 +162,12 @@ class BucketApiIT extends AbstractMetadataIT {
                         .contentType("application/json")
                         .content(json(Map.of(
                                 "sizeBytes", 10,
-                                "contentHash", "a".repeat(64)))))
+                                "contentHash", Sha256.composite(List.of("a".repeat(64))),
+                                "chunks", List.of(Map.of(
+                                        "index", 0,
+                                        "digest", "a".repeat(64),
+                                        "sizeBytes", 10,
+                                        "nodeId", "blob-node-0"))))))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(delete(BUCKETS + "/occupied").header("Authorization", bearer(tenantId)))

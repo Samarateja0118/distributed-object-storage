@@ -1,6 +1,8 @@
 package com.dfs.metadata.api.rest;
 
 import com.dfs.common.security.DfsTokenClaims;
+import com.dfs.metadata.api.rest.dto.ChunkPayload;
+import com.dfs.metadata.api.rest.dto.ObjectChunksResponse;
 import com.dfs.metadata.api.rest.dto.ObjectResponse;
 import com.dfs.metadata.api.rest.dto.PageResponse;
 import com.dfs.metadata.api.rest.dto.PutObjectRequest;
@@ -50,6 +52,7 @@ public class ObjectMetadataController {
                 request.sizeBytes(),
                 request.contentType(),
                 request.contentHash(),
+                request.chunks().stream().map(ChunkPayload::toDomain).toList(),
                 request.userMetadata() == null ? Map.of() : request.userMetadata()));
         return ResponseEntity.status(HttpStatus.CREATED)
                 .eTag("\"" + object.etag() + "\"")
@@ -67,6 +70,24 @@ public class ObjectMetadataController {
                 .eTag("\"" + object.etag() + "\"")
                 .header("X-Object-Version-Id", object.versionId().toString())
                 .body(ObjectResponse.from(object));
+    }
+
+    /**
+     * The chunk list for an object's current version, which is what a download
+     * needs in order to fetch its content.
+     *
+     * <p>Under its own path for the same reason version history is: a
+     * trailing-wildcard object key would otherwise swallow a {@code /chunks}
+     * suffix. It is a separate call rather than a field on the object so that
+     * listing a page of objects does not carry every chunk of every one.
+     */
+    @GetMapping("/object-chunks/{*objectKey}")
+    public ObjectChunksResponse getObjectChunks(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable String bucketName,
+            @PathVariable String objectKey) {
+        return ObjectChunksResponse.from(
+                objectUseCase.getObjectChunks(DfsTokenClaims.tenantId(jwt), bucketName, normalizeKey(objectKey)));
     }
 
     @GetMapping("/objects")
