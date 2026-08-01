@@ -1,8 +1,10 @@
 package com.dfs.upload.infrastructure.adapter.out.metadata;
 
+import com.dfs.upload.domain.model.ObjectChunkRef;
 import com.dfs.upload.domain.model.RegisteredObject;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -21,7 +23,24 @@ final class MetadataObjectPayloads {
             long sizeBytes,
             String contentType,
             String contentHash,
+            List<ChunkPayload> chunks,
             Map<String, String> userMetadata) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record ChunkPayload(int index, String digest, long sizeBytes, String nodeId) {
+
+        static ChunkPayload from(ObjectChunkRef chunk) {
+            return new ChunkPayload(chunk.index(), chunk.digest(), chunk.sizeBytes(), chunk.nodeId());
+        }
+
+        ObjectChunkRef toDomain() {
+            return new ObjectChunkRef(index, digest, sizeBytes, nodeId);
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record ObjectChunksResponse(List<ChunkPayload> chunks) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

@@ -7,6 +7,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,7 +20,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ObjectTransferApiIT extends AbstractUploadOrchestratorIT {
 
     private static final byte[] CONTENT = "the quick brown fox".getBytes(StandardCharsets.UTF_8);
+
+    /** What the single chunk holding this content is filed under on the node. */
     private static final String CONTENT_DIGEST = Sha256.hexOfContent(CONTENT);
+
+    /**
+     * What the object is called. Not the digest of the content: an object is
+     * named by the hash of its chunk digests (ADR 9), which for a one-chunk
+     * object is still a hash of a hash rather than of the bytes.
+     */
+    private static final String OBJECT_DIGEST = Sha256.composite(List.of(CONTENT_DIGEST));
 
     @Test
     @DisplayName("stores the bytes under their digest, then registers the metadata pointing at it")
@@ -29,7 +39,7 @@ class ObjectTransferApiIT extends AbstractUploadOrchestratorIT {
                         .contentType(MediaType.TEXT_PLAIN)
                         .content(CONTENT))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.contentHash").value(CONTENT_DIGEST))
+                .andExpect(jsonPath("$.contentHash").value(OBJECT_DIGEST))
                 .andExpect(jsonPath("$.sizeBytes").value(CONTENT.length))
                 .andExpect(jsonPath("$.key").value("fox.txt"));
 
@@ -44,7 +54,7 @@ class ObjectTransferApiIT extends AbstractUploadOrchestratorIT {
 
         Map<String, Object> registered = objectMapper.readValue(metadataRequest.body(), Map.class);
         assertThat(registered)
-                .containsEntry("contentHash", CONTENT_DIGEST)
+                .containsEntry("contentHash", OBJECT_DIGEST)
                 .containsEntry("sizeBytes", CONTENT.length)
                 .containsEntry("contentType", "text/plain");
     }
@@ -89,12 +99,92 @@ class ObjectTransferApiIT extends AbstractUploadOrchestratorIT {
         byte[] downloaded = mockMvc.perform(get("/api/v1/buckets/photos/objects/fox.txt")
                         .header(HttpHeaders.AUTHORIZATION, bearer()))
                 .andExpect(status().isOk())
-                .andExpect(header().string(HttpHeaders.ETAG, "\"" + CONTENT_DIGEST + "\""))
+                .andExpect(header().string(HttpHeaders.ETAG, "\"" + OBJECT_DIGEST + "\""))
                 .andReturn()
                 .getResponse()
                 .getContentAsByteArray();
 
         assertThat(downloaded).isEqualTo(CONTENT);
+    }
+
+    /**
+     * The point of ADR 8. The content spans several chunks, each stored under its
+     * own digest, and the object is named by the hash of that list — so this
+     * checks the boundaries, the order, and the fact that reassembly returns the
+     * original bytes rather than a plausible-looking permutation of them.
+     */
+    @Test
+    @DisplayName("an object larger than one chunk is split, stored, and reassembled in order")
+    void largeObjectIsChunkedAndReassembled() throws Exception {
+        int chunkSize = 64 * 1024;
+        byte[] content = new byte[chunkSize * 3 + 1234];
+        new java.util.Random(42).nextBytes(content);
+
+        mockMvc.perform(put("/api/v1/buckets/photos/objects/big.bin")
+                        .header(HttpHeaders.AUTHORIZATION, bearer())
+                        .content(content))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.sizeBytes").value(content.length));
+
+        // Four chunks: three full and a remainder, in the order they appear.
+        var puts = DOWNSTREAM.blobCalls().stream().filter(call -> call.operation().equals("PutChunk")).toList();
+        assertThat(puts).hasSize(4);
+        assertThat(puts.subList(0, 3)).allSatisfy(call -> assertThat(call.content()).hasSize(chunkSize));
+        assertThat(puts.getLast().content()).hasSize(1234);
+
+        Map<String, Object> registered =
+                objectMapper.readValue(DOWNSTREAM.metadataRequests().getFirst().body(), Map.class);
+        List<Map<String, Object>> chunks = (List<Map<String, Object>>) registered.get("chunks");
+        assertThat(chunks).hasSize(4);
+        for (int i = 0; i < chunks.size(); i++) {
+            assertThat(chunks.get(i)).containsEntry("index", i);
+            assertThat(chunks.get(i)).containsEntry("digest", puts.get(i).digest());
+            assertThat(chunks.get(i)).containsEntry("nodeId", "blob-node-0");
+        }
+        assertThat(registered).containsEntry("contentHash",
+                Sha256.composite(puts.stream().map(DownstreamStub.BlobCall::digest).toList()));
+
+        byte[] downloaded = mockMvc.perform(get("/api/v1/buckets/photos/objects/big.bin")
+                        .header(HttpHeaders.AUTHORIZATION, bearer()))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsByteArray();
+
+        assertThat(downloaded).isEqualTo(content);
+    }
+
+    /**
+     * Two objects sharing a leading chunk store it once. Fixed-size chunking
+     * deduplicates only where content is identically aligned, and this is that
+     * case — the shared part starts at the same offset in both.
+     */
+    @Test
+    @DisplayName("a chunk shared by two objects is stored once")
+    void identicalChunksAcrossObjectsAreStoredOnce() throws Exception {
+        int chunkSize = 64 * 1024;
+        byte[] shared = new byte[chunkSize];
+        new java.util.Random(7).nextBytes(shared);
+
+        byte[] first = new byte[chunkSize + 10];
+        System.arraycopy(shared, 0, first, 0, chunkSize);
+        byte[] second = new byte[chunkSize + 20];
+        System.arraycopy(shared, 0, second, 0, chunkSize);
+
+        for (var entry : Map.of("a.bin", first, "b.bin", second).entrySet()) {
+            mockMvc.perform(put("/api/v1/buckets/photos/objects/" + entry.getKey())
+                            .header(HttpHeaders.AUTHORIZATION, bearer())
+                            .content(entry.getValue()))
+                    .andExpect(status().isCreated());
+        }
+
+        String sharedDigest = Sha256.hexOfContent(shared);
+        assertThat(DOWNSTREAM.blobCalls())
+                .filteredOn(call -> call.operation().equals("PutChunk") && call.digest().equals(sharedDigest))
+                .hasSize(2);
+        // Sent twice, held once: the digest is the name, so the second write
+        // lands on the first one's bytes.
+        assertThat(DOWNSTREAM.hasBlob(sharedDigest)).isTrue();
     }
 
     @Test
@@ -179,8 +269,20 @@ class ObjectTransferApiIT extends AbstractUploadOrchestratorIT {
         assertThat(DOWNSTREAM.metadataRequests()).isEmpty();
     }
 
+    /**
+     * The limit is enforced against the bytes actually read, so it can only trip
+     * once they have been read — and by then the chunks that fit are already
+     * stored. That is the streaming trade-off, not a leak: no metadata is written,
+     * so the object never becomes visible to any client, and the stray chunks are
+     * unreferenced bytes for GC to reclaim, which is the failure ADR 6 already
+     * chose to accept.
+     *
+     * <p>Checking Content-Length first would usually avoid the writes, but it
+     * cannot be the enforcement point: a client can understate it or omit it
+     * entirely under chunked encoding.
+     */
     @Test
-    @DisplayName("rejects an object larger than the configured limit")
+    @DisplayName("rejects an object larger than the configured limit, registering nothing")
     void rejectsObjectOverTheSizeLimit() throws Exception {
         byte[] tooLarge = new byte[(int) (1024 * 1024) + 1];
 
@@ -189,7 +291,11 @@ class ObjectTransferApiIT extends AbstractUploadOrchestratorIT {
                         .content(tooLarge))
                 .andExpect(status().isPayloadTooLarge());
 
-        assertThat(DOWNSTREAM.blobCalls()).isEmpty();
         assertThat(DOWNSTREAM.metadataRequests()).isEmpty();
+
+        // Nothing is readable, which is the property that matters.
+        mockMvc.perform(get("/api/v1/buckets/photos/objects/big.bin")
+                        .header(HttpHeaders.AUTHORIZATION, bearer()))
+                .andExpect(status().isNotFound());
     }
 }

@@ -58,6 +58,16 @@ The costs are real.
 roughly 12,800 rows. `complete` writes them in one batch, and `object_chunks`
 becomes the largest table in the system by a wide margin.
 
+**An oversized upload now leaves chunks behind.** The size limit is enforced
+against bytes as they are read, because a `Content-Length` can be understated or
+omitted under chunked encoding. Streaming therefore means the limit cannot trip
+until the bytes have arrived, and the chunks that fit are already stored when it
+does. Nothing is registered, so the object never becomes visible to any client,
+and the strays are unreferenced bytes — the same failure ADR 6 already accepts
+for a metadata write that fails, arriving now by a second route. Phase 1 wrote
+nothing at all in this case, so this is a change in behaviour rather than a
+restatement.
+
 **Small objects pay for uniformity.** A 1 KB file is a row, a join, and a chunk
 fetch where Phase 1 had a single blob read. A size threshold would have avoided
 this, at the price of two storage representations that GC, replication, download,

@@ -7,6 +7,8 @@ import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -27,14 +29,48 @@ class ObjectLifecycleE2EIT extends AbstractClusterIT {
         HttpResponse<String> uploaded = upload(tenant, "photos", "fox.txt", content);
         assertThat(uploaded.statusCode()).isEqualTo(201);
 
-        // The digest the orchestrator computed is the one the blob node filed the
-        // bytes under, which is the only thing tying the two halves together.
-        String digest = body(uploaded).get("contentHash").asText();
-        assertThat(digest).isEqualTo(Sha256.hexOfContent(content));
-        assertThat(blobFilesFor(digest)).isEqualTo(1);
+        // The object's name is the composite of its chunk digests, not the hash of
+        // its bytes (ADR 9). This content fits in one chunk, so the composite is
+        // over a single digest — and is still emphatically not that digest.
+        String objectDigest = body(uploaded).get("contentHash").asText();
+        String chunkDigest = Sha256.hexOfContent(content);
+        assertThat(objectDigest).isEqualTo(Sha256.composite(List.of(chunkDigest)));
+        assertThat(objectDigest).isNotEqualTo(chunkDigest);
+
+        // The chunk digest is what the blob node filed the bytes under, and that
+        // is the only thing tying the two halves together.
+        assertThat(blobFilesFor(chunkDigest)).isEqualTo(1);
+        assertThat(blobFilesFor(objectDigest)).isZero();
 
         HttpResponse<byte[]> downloaded = download(tenant, "photos", "fox.txt");
         assertThat(downloaded.statusCode()).isEqualTo(200);
+        assertThat(downloaded.body()).isEqualTo(content);
+    }
+
+    /**
+     * An object that spans chunks, across every real service. The single-service
+     * suites stub one side or the other; only here do the orchestrator's chunk
+     * boundaries, the metadata service's stored list, and the blob node's actual
+     * files all have to agree.
+     */
+    @Test
+    void storesAndReassemblesAMultiChunkObject() throws Exception {
+        Tenant tenant = newTenant();
+        // Larger than the orchestrator's configured chunk size, so it cannot land
+        // in a single chunk however the bytes arrive.
+        byte[] content = new byte[9 * 1024 * 1024 + 511];
+        new Random(1234).nextBytes(content);
+
+        assertThat(createBucket(tenant, "large").statusCode()).isEqualTo(201);
+
+        HttpResponse<String> uploaded = upload(tenant, "large", "video.bin", content);
+        assertThat(uploaded.statusCode()).isEqualTo(201);
+        assertThat(body(uploaded).get("sizeBytes").asLong()).isEqualTo(content.length);
+
+        HttpResponse<byte[]> downloaded = download(tenant, "large", "video.bin");
+        assertThat(downloaded.statusCode()).isEqualTo(200);
+        // Byte-for-byte: a wrong chunk order or a dropped boundary would still
+        // produce the right length.
         assertThat(downloaded.body()).isEqualTo(content);
     }
 
@@ -105,8 +141,11 @@ class ObjectLifecycleE2EIT extends AbstractClusterIT {
         String firstDigest = body(upload(first, "one", "a.txt", content)).get("contentHash").asText();
         String secondDigest = body(upload(second, "two", "b.txt", content)).get("contentHash").asText();
 
+        // Identical content gets one object name, because the composite is a
+        // function of the chunk digests and those are a function of the bytes.
         assertThat(firstDigest).isEqualTo(secondDigest);
-        assertThat(blobFilesFor(firstDigest)).isEqualTo(1);
+        // The file on disk is named by the chunk's digest, not the object's.
+        assertThat(blobFilesFor(Sha256.hexOfContent(content))).isEqualTo(1);
 
         // Deduplicated, but still independently readable by each owner.
         assertThat(download(first, "one", "a.txt").body()).isEqualTo(content);

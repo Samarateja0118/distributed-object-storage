@@ -38,10 +38,11 @@ store.
   └───────────┘     └──────────────┘     └───────────────┘
 ```
 
-An object is stored as **two halves**. Its bytes live on the blob node, addressed
-by the SHA-256 of their own content. Its metadata lives in PostgreSQL, holding the
-bucket, key, version, and the digest naming those bytes. The upload orchestrator
-is the only component that joins them.
+An object is stored as **two halves**. Its bytes live on the blob node as a
+series of chunks, each addressed by the SHA-256 of its own content. Its metadata
+lives in PostgreSQL, holding the bucket, key, version, and the ordered list of
+chunk digests naming those bytes. The upload orchestrator is the only component
+that joins them.
 
 That split is what makes deduplication and idempotent writes possible, and it is
 also the system's most interesting problem: no transaction spans the two
@@ -68,7 +69,7 @@ chooses to leave behind is documented in
 - Storage sharded two levels deep by digest prefix
 
 **Upload orchestration**
-- Whole-object upload and download, joining content to metadata
+- Objects split into fixed-size chunks, stored independently and reassembled in order; one chunk is in memory at a time, in either direction
 - The caller's own JWT is forwarded to both downstream services; there is no service account anywhere
 - Write ordering chosen so a partial failure never leaves an object that lists but cannot be downloaded
 
@@ -148,17 +149,18 @@ curl -sX PUT localhost:8083/api/v1/buckets/photos/objects/hello.txt \
   -H 'Content-Type: text/plain' \
   --data-binary 'hello world'
 # → 201 {"key":"hello.txt","versionId":"…","sizeBytes":11,"contentType":"text/plain",
-#        "contentHash":"b94d27b9…cde9","etag":"b94d27b9…cde9","userMetadata":{}}
+#        "contentHash":"bc62d4b8…4423","etag":"bc62d4b8…4423","userMetadata":{}}
 
 # Read it back — the bytes, with the digest as ETag
 curl -i localhost:8083/api/v1/buckets/photos/objects/hello.txt \
   -H "Authorization: Bearer $TOKEN"
-# → 200, ETag: "b94d27b9…cde9", X-Object-Version-Id: …, body: hello world
+# → 200, ETag: "bc62d4b8…4423", X-Object-Version-Id: …, body: hello world
 ```
 
-Uploading the same bytes under a second key stores one blob, not two — the
+Uploading the same bytes under a second key stores one copy, not two — the
 `contentHash` in both upload responses is the same, and only one file appears
-under `blob-data/`. That holds across tenants as well as across keys: the blob
+under `blob-data/`. Note that the file there is named by the *chunk's* digest,
+which is why it does not match the `contentHash` above. That holds across tenants as well as across keys: the blob
 is shared, while a second tenant asking for the first tenant's key still gets a
 404, because tenancy is enforced on the metadata pointer rather than on the
 bytes.
@@ -228,14 +230,20 @@ mvn -pl dfs-metadata-service -am verify -Dit.test=BucketApiIT
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Auth, buckets, single-node object upload/download | ✅ Complete |
-| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path done |
+| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path and chunking done |
 | **3** | Replication, GC and refcounting, presigned URLs, encryption | Planned |
 | **4** | Observability, benchmarking, admin ops, multi-tenant scale | Planned |
 
-Two current limits are deliberate rather than unfinished: the orchestrator
-buffers each object in memory, which is what lets the digest be computed before
-the first byte is sent (chunking removes it), and auth stops at login, JWT, and
-API keys — a `role` claim exists, but no per-bucket RBAC is enforced.
+Two current limits are deliberate rather than unfinished: every chunk goes to a
+single blob node, because choosing among several is a placement decision still to
+come, and auth stops at login, JWT, and API keys — a `role` claim exists, but no
+per-bucket RBAC is enforced.
+
+One behaviour is worth calling out, because it is the kind that fails quietly.
+An object is stored as an ordered list of chunks, and its `contentHash` is the
+digest of that list rather than of its bytes. Hashing a file locally and
+comparing it against the ETag will not match — the value identifies the content
+and is stable across re-uploads, but it is not the file's SHA-256.
 
 <!-- TODO: add a Screenshots section. Options that demo well:
      - a terminal recording of the upload/download round trip above

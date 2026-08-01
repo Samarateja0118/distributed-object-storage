@@ -9,6 +9,10 @@ dfs:
       issuer: dfs-auth-test
       signing-secret: test-signing-secret-not-used-outside-tests
   upload:
+    # Far below production's 8MB so a modest payload spans several chunks. The
+    # multi-chunk path is the one worth exercising; an object that fits in one
+    # chunk never crosses a boundary and proves nothing about ordering.
+    chunk-size: 64KB
     # Small enough to test the limit without allocating 100MB in a test.
     max-object-size: 1MB
     downstream-timeout: 5s

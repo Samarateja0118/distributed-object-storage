@@ -2,11 +2,12 @@ package com.dfs.upload.api.rest;
 
 import com.dfs.upload.api.rest.dto.UploadedObjectResponse;
 import com.dfs.upload.application.port.in.ObjectTransferUseCase;
-import com.dfs.upload.config.UploadProperties;
 import com.dfs.upload.domain.model.CallerToken;
 import com.dfs.upload.domain.model.ObjectDownload;
 import com.dfs.upload.domain.model.RegisteredObject;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -43,11 +44,9 @@ public class ObjectContentController {
     private static final String USER_METADATA_PREFIX = "x-dfs-meta-";
 
     private final ObjectTransferUseCase objects;
-    private final long maxObjectSizeBytes;
 
-    public ObjectContentController(ObjectTransferUseCase objects, UploadProperties properties) {
+    public ObjectContentController(ObjectTransferUseCase objects) {
         this.objects = objects;
-        this.maxObjectSizeBytes = properties.maxObjectSize().toBytes();
     }
 
     @PutMapping("/objects/{*objectKey}")
@@ -56,14 +55,15 @@ public class ObjectContentController {
             @PathVariable String bucketName,
             @PathVariable String objectKey,
             HttpServletRequest request,
-            InputStream body) throws IOException {
+            InputStream body) {
 
-        byte[] content = RequestBodyReader.readAtMost(body, maxObjectSizeBytes);
-
+        // Handed over unread: the service chunks it as it arrives, so nothing
+        // here needs the whole object, and the size limit is enforced against the
+        // bytes actually read rather than a Content-Length a client can misstate.
         RegisteredObject registered = objects.upload(new ObjectTransferUseCase.UploadCommand(
                 bucketName,
                 normalizeKey(objectKey),
-                content,
+                body,
                 request.getContentType(),
                 userMetadataFrom(request),
                 callerToken(jwt)));
@@ -76,9 +76,13 @@ public class ObjectContentController {
 
     /**
      * Also serves HEAD, which Spring answers with these headers and no body.
+     *
+     * <p>Returns a {@link Resource} over the chunk stream rather than a byte
+     * array, so chunks are fetched as the response is written and a download
+     * never assembles the whole object in memory.
      */
     @GetMapping("/objects/{*objectKey}")
-    public ResponseEntity<byte[]> download(
+    public ResponseEntity<Resource> download(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable String bucketName,
             @PathVariable String objectKey) {
@@ -101,7 +105,7 @@ public class ObjectContentController {
                 .contentLength(object.sizeBytes())
                 .eTag("\"" + object.etag() + "\"")
                 .header("X-Object-Version-Id", object.versionId().toString())
-                .body(download.content());
+                .body(new InputStreamResource(download.content()));
     }
 
     /**
