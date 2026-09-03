@@ -139,7 +139,11 @@ class ObjectTransferApiIT extends AbstractUploadOrchestratorIT {
         for (int i = 0; i < chunks.size(); i++) {
             assertThat(chunks.get(i)).containsEntry("index", i);
             assertThat(chunks.get(i)).containsEntry("digest", puts.get(i).digest());
-            assertThat(chunks.get(i)).containsEntry("nodeId", "blob-node-0");
+            // Which node a chunk lands on is placement's decision (ADR 11), so the
+            // assertion is that the recorded node is the one that actually took
+            // the bytes — not that it is any particular node.
+            assertThat(chunks.get(i).get("nodeId")).isIn(DownstreamStub.NODE_IDS);
+            assertThat(chunks.get(i)).containsEntry("nodeId", puts.get(i).nodeId());
         }
         assertThat(registered).containsEntry("contentHash",
                 Sha256.composite(puts.stream().map(DownstreamStub.BlobCall::digest).toList()));

@@ -4,6 +4,7 @@ import com.dfs.common.hash.Sha256;
 import com.dfs.upload.application.port.in.ObjectTransferUseCase;
 import com.dfs.upload.application.port.out.BlobStorePort;
 import com.dfs.upload.application.port.out.MetadataRegistryPort;
+import com.dfs.upload.domain.exception.DownstreamUnavailableException;
 import com.dfs.upload.domain.exception.ObjectTooLargeException;
 import com.dfs.upload.domain.model.CallerToken;
 import com.dfs.upload.domain.model.ObjectChunkRef;
@@ -39,11 +40,56 @@ public class ObjectTransferService implements ObjectTransferUseCase {
     private final BlobStorePort blobs;
     private final MetadataRegistryPort metadata;
     private final ChunkingPolicy chunking;
+    private final ChunkPlacement placement;
 
-    public ObjectTransferService(BlobStorePort blobs, MetadataRegistryPort metadata, ChunkingPolicy chunking) {
+    public ObjectTransferService(
+            BlobStorePort blobs,
+            MetadataRegistryPort metadata,
+            ChunkingPolicy chunking,
+            ChunkPlacement placement) {
         this.blobs = blobs;
         this.metadata = metadata;
         this.chunking = chunking;
+        this.placement = placement;
+    }
+
+    /**
+     * Writes one chunk to the best node that will take it, and reports which node
+     * that turned out to be.
+     *
+     * <p>Placement names a preference, not a destination (ADR 11). When the
+     * preferred node cannot be reached the write continues down the ranking, so a
+     * node being down costs write availability for nothing but the time it takes
+     * to fail over. Only an unreachable node is worth walking past: a node that
+     * answered and refused — a digest that does not match its bytes, a rejected
+     * token — will refuse on every other node too, and retrying would turn one
+     * clear error into several.
+     *
+     * <p>The node that accepted the chunk is returned so it can be recorded
+     * against it. Nothing recomputes this later; a fallback write is
+     * indistinguishable from a preferred one on read precisely because the read
+     * follows the record rather than the ranking.
+     */
+    private String storeChunk(String digest, byte[] chunk, CallerToken token) {
+        List<String> ranked = placement.rankFor(digest);
+        DownstreamUnavailableException lastFailure = null;
+
+        for (String nodeId : ranked) {
+            try {
+                blobs.store(nodeId, digest, chunk, token);
+                if (lastFailure != null) {
+                    log.warn("Chunk {} placed on {} after its preferred node was unreachable", digest, nodeId);
+                }
+                return nodeId;
+            } catch (DownstreamUnavailableException unreachable) {
+                log.warn("Blob node {} did not answer for chunk {}; trying the next in the ranking",
+                        nodeId, digest);
+                lastFailure = unreachable;
+            }
+        }
+
+        throw new DownstreamUnavailableException(
+                "No blob node accepted chunk %s; tried %s".formatted(digest, ranked), lastFailure);
     }
 
     /**
@@ -95,8 +141,8 @@ public class ObjectTransferService implements ObjectTransferUseCase {
 
                 byte[] chunk = filled == buffer.length ? buffer.clone() : Arrays.copyOf(buffer, filled);
                 String digest = Sha256.hexOfContent(chunk);
-                blobs.store(digest, chunk, command.token());
-                chunks.add(new ObjectChunkRef(index++, digest, filled, chunking.nodeId()));
+                String nodeId = storeChunk(digest, chunk, command.token());
+                chunks.add(new ObjectChunkRef(index++, digest, filled, nodeId));
             }
         } catch (IOException e) {
             throw new UncheckedIOException("Failed while reading the object's content", e);
@@ -158,7 +204,9 @@ public class ObjectTransferService implements ObjectTransferUseCase {
                 if (!hasMoreElements()) {
                     throw new NoSuchElementException();
                 }
-                return new ByteArrayInputStream(blobs.fetch(chunks.get(next++).digest(), token));
+                ObjectChunkRef chunk = chunks.get(next++);
+                // The recorded node, never the ranking: that is the whole of ADR 11.
+                return new ByteArrayInputStream(blobs.fetch(chunk.nodeId(), chunk.digest(), token));
             }
         });
     }

@@ -1,6 +1,5 @@
 package com.dfs.upload.infrastructure.adapter.out.blob;
 
-import com.dfs.proto.blob.v1.BlobNodeServiceGrpc;
 import com.dfs.proto.blob.v1.GetChunkRequest;
 import com.dfs.proto.blob.v1.GetChunkResponse;
 import com.dfs.proto.blob.v1.PutChunkHeader;
@@ -53,15 +52,11 @@ public class GrpcBlobStoreAdapter implements BlobStorePort {
      */
     private static final int FRAME_BYTES = 64 * 1024;
 
-    private final BlobNodeServiceGrpc.BlobNodeServiceStub asyncStub;
-    private final BlobNodeServiceGrpc.BlobNodeServiceBlockingStub blockingStub;
+    private final BlobNodeStubs stubs;
     private final long deadlineMillis;
 
-    public GrpcBlobStoreAdapter(BlobNodeServiceGrpc.BlobNodeServiceStub blobNodeStub,
-                                BlobNodeServiceGrpc.BlobNodeServiceBlockingStub blobNodeBlockingStub,
-                                UploadProperties properties) {
-        this.asyncStub = blobNodeStub;
-        this.blockingStub = blobNodeBlockingStub;
+    public GrpcBlobStoreAdapter(BlobNodeStubs stubs, UploadProperties properties) {
+        this.stubs = stubs;
         this.deadlineMillis = properties.downstreamTimeout().toMillis();
     }
 
@@ -75,9 +70,9 @@ public class GrpcBlobStoreAdapter implements BlobStorePort {
      * which the response never arrives.
      */
     @Override
-    public void store(String digest, byte[] content, CallerToken token) {
+    public void store(String nodeId, String digest, byte[] content, CallerToken token) {
         CompletableFuture<PutChunkResponse> response = new CompletableFuture<>();
-        StreamObserver<PutChunkRequest> frames = asyncStub
+        StreamObserver<PutChunkRequest> frames = stubs.require(nodeId).async()
                 .withInterceptors(bearer(token))
                 .withDeadlineAfter(deadlineMillis, TimeUnit.MILLISECONDS)
                 .putChunk(completing(response));
@@ -104,9 +99,9 @@ public class GrpcBlobStoreAdapter implements BlobStorePort {
     }
 
     @Override
-    public byte[] fetch(String digest, CallerToken token) {
+    public byte[] fetch(String nodeId, String digest, CallerToken token) {
         try {
-            Iterator<GetChunkResponse> frames = blockingStub
+            Iterator<GetChunkResponse> frames = stubs.require(nodeId).blocking()
                     .withInterceptors(bearer(token))
                     .withDeadlineAfter(deadlineMillis, TimeUnit.MILLISECONDS)
                     .getChunk(GetChunkRequest.newBuilder().setContentHash(digest).build());

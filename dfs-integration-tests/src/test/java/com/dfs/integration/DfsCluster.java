@@ -162,8 +162,12 @@ final class DfsCluster {
         // pointed at two different addresses on two different transports. The
         // blob node's HTTP port is still served, and still exercised directly by
         // the tests, but the orchestrator no longer calls it.
+        // One blob node in this cluster, so the node set has a single member and
+        // placement has one choice. Its id is blob-node-0 because that is the id
+        // every chunk written before placement existed was recorded under, and an
+        // id that has held a chunk has to stay configured (ADR 11).
         launch("dfs-upload-orchestrator", orchestratorPort, Map.of(
-                "BLOB_GRPC_TARGET", "static://localhost:" + blobGrpcPort,
+                "BLOB_NODE_0_TARGET", "static://localhost:" + blobGrpcPort,
                 "METADATA_SERVICE_URL", metadataUrl));
 
         awaitHealthy("dfs-auth-service", authUrl);

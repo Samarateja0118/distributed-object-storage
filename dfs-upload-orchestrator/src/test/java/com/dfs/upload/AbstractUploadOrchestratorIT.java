@@ -45,10 +45,14 @@ abstract class AbstractUploadOrchestratorIT {
 
     @DynamicPropertySource
     static void downstreamAddresses(DynamicPropertyRegistry registry) {
-        // The channel is configured from this property, so pointing it at the
-        // in-process stub exercises the wiring production uses rather than a
-        // channel assembled for the test.
-        registry.add("dfs.upload.blob-grpc-target", DOWNSTREAM::blobGrpcTarget);
+        // Each node's channel is configured from its own grpc.client block, named
+        // by the node id — the same wiring production uses, pointed at the
+        // in-process stubs rather than a channel assembled for the test.
+        registry.add("dfs.upload.blob-nodes", () -> String.join(",", DownstreamStub.NODE_IDS));
+        for (String nodeId : DownstreamStub.NODE_IDS) {
+            registry.add("grpc.client." + nodeId + ".address", () -> DownstreamStub.blobGrpcTarget(nodeId));
+            registry.add("grpc.client." + nodeId + ".negotiation-type", () -> "plaintext");
+        }
         registry.add("dfs.upload.metadata-base-url", DOWNSTREAM::metadataBaseUrl);
     }
 
