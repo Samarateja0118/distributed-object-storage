@@ -21,7 +21,12 @@ dfs:
       issuer: dfs-auth
       signing-secret: ${JWT_SIGNING_SECRET:change-me-in-production}
   blob:
-    node-id: ${BLOB_NODE_ID:blob-node-1}
+    # Informational: nothing here reads it yet, because a node does not report
+    # its own identity — the orchestrator's dfs.upload.blob-nodes is what names
+    # nodes, and what gets recorded against a chunk. Defaulted to match that
+    # list's single member so one local cluster does not have two names for the
+    # same node.
+    node-id: ${BLOB_NODE_ID:blob-node-0}
     storage-root-path: ${BLOB_STORAGE_PATH:./blob-data/node-1}
     capacity-bytes: ${BLOB_CAPACITY_BYTES:107374182400}
     rack: ${BLOB_RACK:rack-a}

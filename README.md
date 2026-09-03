@@ -129,7 +129,9 @@ mvn -pl dfs-blob-node           -am spring-boot:run   # :8090
 Wait for each to report `Started …Application` before running the sequence
 below. If a port is already taken, override it — `SERVER_PORT=18082` — and tell
 the orchestrator where to look with `METADATA_SERVICE_URL` or, for the blob
-node's gRPC port (`GRPC_PORT`, 9090 by default), `BLOB_GRPC_TARGET`.
+node's gRPC port (`GRPC_PORT`, 9090 by default), `BLOB_NODE_0_TARGET` — the
+address of the node whose id is `blob-node-0`, the single member of the default
+node set.
 
 ```bash
 # Register a tenant
@@ -240,14 +242,20 @@ mvn -pl dfs-metadata-service -am verify -Dit.test=BucketApiIT
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Auth, buckets, single-node object upload/download | ✅ Complete |
-| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path and chunking done |
+| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path, chunking and placement done |
 | **3** | Replication, GC and refcounting, presigned URLs, encryption | Planned |
 | **4** | Observability, benchmarking, admin ops, multi-tenant scale | Planned |
 
-Two current limits are deliberate rather than unfinished: every chunk goes to a
-single blob node, because choosing among several is a placement decision still to
-come, and auth stops at login, JWT, and API keys — a `role` claim exists, but no
-per-bucket RBAC is enforced.
+Chunks are spread across a configured set of blob nodes by rendezvous hashing,
+and the node that actually took each chunk is recorded against it — so a write
+that failed over to its second choice reads back exactly like one that did not.
+Reads follow the record rather than recomputing where a chunk ought to be, which
+is what keeps adding a node from breaking reads of everything already stored.
+
+Two current limits are deliberate rather than unfinished: the cluster writes one
+copy of each chunk, so this phase is distributed but not yet redundant, and auth
+stops at login, JWT, and API keys — a `role` claim exists, but no per-bucket RBAC
+is enforced.
 
 One behaviour is worth calling out, because it is the kind that fails quietly.
 An object is stored as an ordered list of chunks, and its `contentHash` is the
