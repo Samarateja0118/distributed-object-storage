@@ -15,10 +15,6 @@ package com.dfs.upload.application.service;
  * @param maxObjectSizeBytes ceiling on a single upload. Once content is streamed
  *                          chunk by chunk this is a policy limit rather than the
  *                          heap bound it was in Phase 1.
- * @param nodeId            the blob node chunks are written to. Phase 2's first
- *                          chunking milestone runs one node; choosing among
- *                          several is ADR 11's job, and the recorded value is
- *                          what reads follow either way.
  */
-public record ChunkingPolicy(int chunkSizeBytes, long maxObjectSizeBytes, String nodeId) {
+public record ChunkingPolicy(int chunkSizeBytes, long maxObjectSizeBytes) {
 }

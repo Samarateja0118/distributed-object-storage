@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Import;
 import com.dfs.common.infrastructure.config.KafkaConfiguration;
 import com.dfs.common.infrastructure.config.OpenApiConfiguration;
 import com.dfs.common.infrastructure.config.RedisConfiguration;
+import com.dfs.upload.application.service.ChunkPlacement;
 import com.dfs.upload.application.service.ChunkingPolicy;
 
 @Configuration
@@ -24,7 +25,16 @@ public class UploadInfrastructureConfiguration {
     ChunkingPolicy chunkingPolicy(UploadProperties properties) {
         return new ChunkingPolicy(
                 (int) properties.chunkSize().toBytes(),
-                properties.maxObjectSize().toBytes(),
-                properties.blobNodeId());
+                properties.maxObjectSize().toBytes());
+    }
+
+    /**
+     * The node set placement ranks over (ADR 11). Built from the same list the
+     * gRPC channels are, so a node cannot be reachable but unplaceable, or
+     * ranked but unreachable.
+     */
+    @Bean
+    ChunkPlacement chunkPlacement(UploadProperties properties) {
+        return new ChunkPlacement(properties.blobNodes());
     }
 }

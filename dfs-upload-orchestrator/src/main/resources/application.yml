@@ -23,12 +23,14 @@ server:
 
 grpc:
   client:
-    blob-node:
-      # One address, declared once above: this block is the channel's, but the
-      # value belongs with the service's other downstream addresses.
-      address: ${dfs.upload.blob-grpc-target}
-      # Internal cluster traffic, and nothing else here speaks TLS yet. The
-      # starter would otherwise default to it and fail to connect.
+    # One block per node in dfs.upload.blob-nodes, named by the node's id. The id
+    # is the key placement ranks over and the name of the channel, so a node is
+    # configured once and called by one name everywhere.
+    #
+    # Internal cluster traffic, and nothing here speaks TLS yet; the starter
+    # would otherwise default to it and fail to connect.
+    blob-node-0:
+      address: ${BLOB_NODE_0_TARGET:static://localhost:9090}
       negotiation-type: plaintext
 
 dfs:
@@ -44,15 +46,18 @@ dfs:
     chunk-size: 8MB
     max-concurrent-chunks: 8
     multipart-session-ttl: 24h
-    # The byte path is gRPC; metadata stays REST, so the orchestrator reaches it
-    # through the same public API as any other client (ADR 10). The metadata
-    # target below is scaffolding and is not read by anything yet.
+    # Scaffolding: the metadata service stays on REST (ADR 10), so nothing reads
+    # this yet. Kept because that decision is deliberate, not an omission.
     metadata-grpc-target: static://localhost:9082
-    blob-grpc-target: ${BLOB_GRPC_TARGET:static://localhost:9090}
     metadata-base-url: ${METADATA_SERVICE_URL:http://localhost:8082}
-    # The node chunks are written to, recorded against each chunk so reads follow
-    # where the bytes actually went (ADR 11). One node until placement arrives.
-    blob-node-id: ${BLOB_NODE_ID:blob-node-0}
+    # The cluster's nodes, ranked over by rendezvous hashing (ADR 11). Each id
+    # needs a matching grpc.client.<id> block above.
+    #
+    # blob-node-0 is the id every pre-placement chunk was recorded under, so it
+    # stays in this list whether or not it is still preferred for new writes —
+    # dropping it would make those chunks unreachable.
+    blob-nodes:
+      - blob-node-0
     # Content is streamed a chunk at a time, so this caps how large an object may
     # be rather than how much heap one request can take.
     max-object-size: 100MB

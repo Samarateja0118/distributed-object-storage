@@ -124,7 +124,7 @@ mvn clean verify -DargLine="-Dapi.version=1.44"
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Auth, buckets, single-node object upload/download | ✅ Complete |
-| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path and chunking done |
+| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path, chunking and placement done |
 | **3** | Replication, GC, blob refcounting, presigned URLs, encryption | Planned |
 | **4** | Observability, benchmarking, admin ops, multi-tenant scale | Planned |
 
@@ -135,7 +135,13 @@ Two scoping decisions hold unless the repository owner changes them:
 1. gRPC carries the **byte path only** — the orchestrator's calls to the blob node. The metadata service and the client-facing API stay REST ([ADR 10](docs/adr/0010-grpc-for-the-byte-path.md)), and `metadataGrpcTarget` remains unused scaffolding. The blob node's REST endpoints also stay until the gRPC path has proven itself; `ObjectLifecycleE2EIT.refusesUnauthenticatedBlobReads` is coupled to them and needs a gRPC equivalent when they go.
 2. Auth is **login, JWT, and API keys — not full RBAC**. A `role` claim exists (OWNER/MEMBER) but nothing enforces per-bucket permissions.
 
-3. Chunk placement is **not yet a decision**. Every chunk is written to the single node named by `dfs.upload.blob-node-id`, and the value is recorded per chunk so reads follow it. Choosing among several nodes is [ADR 11](docs/adr/0011-chunk-placement-is-recorded-not-recomputed.md), still to come.
+3. The cluster writes **one copy** of every chunk. "Multi-node" here means distributed, not redundant — losing a node's disk loses data until replication lands in Phase 3 ([ADR 11](docs/adr/0011-chunk-placement-is-recorded-not-recomputed.md)).
+
+Chunk placement is rendezvous hashing over `dfs.upload.blob-nodes`, a statically configured set — adding a node is a redeploy. The ranking is a *preference*: a write that cannot reach its preferred node walks down the list, and the node that accepted the chunk is what gets recorded. Reads follow that record and never recompute the ranking, which is what makes a fallback write indistinguishable from a normal one ([ADR 11](docs/adr/0011-chunk-placement-is-recorded-not-recomputed.md)).
+
+Only an *unreachable* node is walked past. A node that answers and refuses will refuse identically everywhere else, so failing over would turn one clear error into several. There is no health checker: a write discovers a node is down by failing to reach it.
+
+**A node id that has ever held a chunk must stay in `dfs.upload.blob-nodes`,** with its `grpc.client.<id>.address` block, whether or not it still takes new writes. Chunks are recorded against it by name and reads ask for it by name; dropping the id makes those chunks unreachable while the bytes sit intact on disk. `blob-node-0` is the id everything written before placement carries.
 
 An object is an ordered list of chunks, `dfs.upload.chunk-size` each. The orchestrator holds one chunk at a time in both directions, so `dfs.upload.max-object-size` is now a policy ceiling rather than a bound on heap. It is enforced against bytes as they are read — a `Content-Length` can be understated or omitted — so an oversized upload stores the chunks that fit before it is rejected. Nothing is registered, so the object never becomes visible, and the stray chunks are unreferenced bytes for GC.
 
