@@ -4,12 +4,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.unit.DataSize;
 
 import java.time.Duration;
+import java.util.List;
 
 /**
- * @param blobGrpcTarget    Address of the blob node's gRPC surface, which is how
- *                          the byte path travels from Phase 2 (ADR 10). Read
- *                          through the {@code grpc.client.blob-node} block that
- *                          configures the channel.
+ * @param blobNodes         The static blob node set chunks are placed across
+ *                          (ADR 11). Each node's gRPC surface is how the byte
+ *                          path travels (ADR 10). Adding a node is a redeploy:
+ *                          a dynamic registry belongs with the admin service.
  * @param metadataGrpcTarget Scaffolding: the metadata service stays on REST, so
  *                          nothing reads this yet.
  * @param metadataBaseUrl   REST base URL of the metadata service.
@@ -18,10 +19,6 @@ import java.time.Duration;
  *                          bytes cut at a different size produce a different
  *                          composite digest, so changing this changes the
  *                          identity of every object written afterwards (ADR 9).
- * @param blobNodeId        Which blob node chunks are written to, recorded
- *                          against each chunk so reads follow where the bytes
- *                          actually went (ADR 11). One node until placement
- *                          arrives.
  * @param maxObjectSize     Ceiling on a single upload. Content is streamed a
  *                          chunk at a time, so this caps how large an object may
  *                          be rather than how much heap one request can take.
@@ -36,10 +33,24 @@ public record UploadProperties(
         int maxConcurrentChunks,
         Duration multipartSessionTtl,
         String metadataGrpcTarget,
-        String blobGrpcTarget,
+        List<BlobNode> blobNodes,
         String metadataBaseUrl,
-        String blobNodeId,
         DataSize maxObjectSize,
         Duration downstreamTimeout
 ) {
+
+    /**
+     * One blob node.
+     *
+     * @param id     The name recorded against every chunk written to this node,
+     *               and what reads use to find it again. It must never be
+     *               reused for a different node or renamed while chunks are
+     *               recorded on it: the metadata service keeps the id, not the
+     *               address, so a renamed node strands every chunk on it.
+     * @param target The node's gRPC address, in the form the gRPC client
+     *               accepts — {@code static://host:port}, {@code dns:///host:port},
+     *               or {@code in-process:name} in tests.
+     */
+    public record BlobNode(String id, String target) {
+    }
 }

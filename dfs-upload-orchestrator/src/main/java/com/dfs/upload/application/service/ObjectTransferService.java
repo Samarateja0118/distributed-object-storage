@@ -4,11 +4,13 @@ import com.dfs.common.hash.Sha256;
 import com.dfs.upload.application.port.in.ObjectTransferUseCase;
 import com.dfs.upload.application.port.out.BlobStorePort;
 import com.dfs.upload.application.port.out.MetadataRegistryPort;
+import com.dfs.upload.domain.exception.DownstreamUnavailableException;
 import com.dfs.upload.domain.exception.ObjectTooLargeException;
 import com.dfs.upload.domain.model.CallerToken;
 import com.dfs.upload.domain.model.ObjectChunkRef;
 import com.dfs.upload.domain.model.ObjectDownload;
 import com.dfs.upload.domain.model.RegisteredObject;
+import com.dfs.upload.domain.placement.RendezvousPlacement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -39,11 +41,16 @@ public class ObjectTransferService implements ObjectTransferUseCase {
     private final BlobStorePort blobs;
     private final MetadataRegistryPort metadata;
     private final ChunkingPolicy chunking;
+    private final RendezvousPlacement placement;
 
-    public ObjectTransferService(BlobStorePort blobs, MetadataRegistryPort metadata, ChunkingPolicy chunking) {
+    public ObjectTransferService(BlobStorePort blobs,
+                                 MetadataRegistryPort metadata,
+                                 ChunkingPolicy chunking,
+                                 RendezvousPlacement placement) {
         this.blobs = blobs;
         this.metadata = metadata;
         this.chunking = chunking;
+        this.placement = placement;
     }
 
     /**
@@ -71,6 +78,10 @@ public class ObjectTransferService implements ObjectTransferUseCase {
      * <p>Only one chunk is in memory at a time, which is what ADR 8 buys: an
      * object's size is no longer bounded by the heap, and the configured maximum
      * becomes a policy rather than a survival limit.
+     *
+     * <p>Each chunk goes to the node its digest ranks first, or the next one
+     * that answers, and the node it actually went to is what gets registered
+     * (ADR 11) — see {@link #storeOnFirstAvailableNode}.
      */
     @Override
     public RegisteredObject upload(UploadCommand command) {
@@ -95,8 +106,8 @@ public class ObjectTransferService implements ObjectTransferUseCase {
 
                 byte[] chunk = filled == buffer.length ? buffer.clone() : Arrays.copyOf(buffer, filled);
                 String digest = Sha256.hexOfContent(chunk);
-                blobs.store(digest, chunk, command.token());
-                chunks.add(new ObjectChunkRef(index++, digest, filled, chunking.nodeId()));
+                String nodeId = storeOnFirstAvailableNode(digest, chunk, command.token());
+                chunks.add(new ObjectChunkRef(index++, digest, filled, nodeId));
             }
         } catch (IOException e) {
             throw new UncheckedIOException("Failed while reading the object's content", e);
@@ -123,6 +134,47 @@ public class ObjectTransferService implements ObjectTransferUseCase {
     }
 
     /**
+     * Writes one chunk to the most preferred node that answers, and returns the
+     * node it was written to.
+     *
+     * <p>Only a node that <em>did not answer</em> is skipped. A node that answered
+     * and refused — a rejected token, a digest mismatch, an internal error — fails
+     * the upload as before: another node would refuse the same token, and a
+     * corrupt chunk is no better on a different disk. Falling through on those
+     * would hide a real error behind a slower success, or a slower failure.
+     *
+     * <p>A fallback write needs no repair afterwards. The chunk is recorded
+     * against the node that took it, and reads follow the record rather than the
+     * ranking, so a chunk written to its second choice is read exactly like one
+     * written to its first.
+     *
+     * <p>Deduplication survives placement because the ranking is a function of
+     * the digest alone: identical chunks prefer the same node, whichever object
+     * they belong to. The exception is a fallback write, which can leave one copy
+     * on each of two nodes. That costs disk, not correctness, since each object
+     * records which copy it uses.
+     */
+    private String storeOnFirstAvailableNode(String digest, byte[] chunk, CallerToken token) {
+        DownstreamUnavailableException lastFailure = null;
+        for (String nodeId : placement.rank(digest)) {
+            try {
+                blobs.store(nodeId, digest, chunk, token);
+                if (lastFailure != null) {
+                    log.warn("Chunk {} stored on fallback node {}", digest, nodeId);
+                }
+                return nodeId;
+            } catch (DownstreamUnavailableException unavailable) {
+                log.warn("Blob node {} did not answer for chunk {}; trying the next node in its ranking",
+                        nodeId, digest);
+                lastFailure = unavailable;
+            }
+        }
+        // The ranking holds every configured node and is never empty, so this is
+        // reached only when none of them answered.
+        throw lastFailure;
+    }
+
+    /**
      * The reverse: metadata resolves the key to a chunk list, then the chunks are
      * fetched in order as the caller reads them.
      *
@@ -131,6 +183,11 @@ public class ObjectTransferService implements ObjectTransferUseCase {
      * content before the metadata service has confirmed this tenant owns the key
      * would let a caller read any chunk whose digest they could guess or had once
      * seen.
+     *
+     * <p>Each chunk is fetched from the node recorded for it, never from where
+     * the placement ranking would put it today (ADR 11). With one copy per chunk
+     * there is no other node to try, so a read whose node is down fails rather
+     * than falling back.
      */
     @Override
     public ObjectDownload download(DownloadQuery query) {
@@ -158,7 +215,8 @@ public class ObjectTransferService implements ObjectTransferUseCase {
                 if (!hasMoreElements()) {
                     throw new NoSuchElementException();
                 }
-                return new ByteArrayInputStream(blobs.fetch(chunks.get(next++).digest(), token));
+                ObjectChunkRef chunk = chunks.get(next++);
+                return new ByteArrayInputStream(blobs.fetch(chunk.nodeId(), chunk.digest(), token));
             }
         });
     }
