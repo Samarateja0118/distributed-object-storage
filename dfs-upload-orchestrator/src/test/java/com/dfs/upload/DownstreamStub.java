@@ -81,6 +81,9 @@ final class DownstreamStub {
     /** Chunk lists, keyed like {@link #objects} and served from their own path. */
     private final Map<String, List<Map<String, Object>>> objectChunks = new ConcurrentHashMap<>();
 
+    /** Registered multipart parts, keyed by bucket/uploadId/partNumber, as sent. */
+    private final Map<String, Map<String, Object>> parts = new ConcurrentHashMap<>();
+
     private volatile int metadataFailureStatus;
 
     DownstreamStub() {
@@ -117,6 +120,7 @@ final class DownstreamStub {
         blobNodes.values().forEach(BlobNodeStub::reset);
         objects.clear();
         objectChunks.clear();
+        parts.clear();
         metadataFailureStatus = 0;
     }
 
@@ -167,6 +171,11 @@ final class DownstreamStub {
         node(NODE_IDS.getFirst()).blobs.put(digest, content);
         objects.put(bucket + "/" + key, objectRecord(key, digest, content.length, null, Map.of()));
         objectChunks.put(bucket + "/" + key, List.of(chunkRecord(0, digest, content.length, NODE_IDS.getFirst())));
+    }
+
+    /** The body the orchestrator registered for this part, or null if none was. */
+    Map<String, Object> registeredPart(String bucket, java.util.UUID uploadId, int partNumber) {
+        return parts.get(bucket + "/" + uploadId + "/" + partNumber);
     }
 
     List<BlobCall> blobCalls() {
@@ -320,6 +329,27 @@ final class DownstreamStub {
         // /api/v1/buckets/{bucket}/objects/{key...}, or the chunk list beside it.
         String path = URLDecoder.decode(exchange.getRequestURI().getPath(), StandardCharsets.UTF_8);
         String remainder = path.substring("/api/v1/buckets/".length());
+
+        // /api/v1/buckets/{bucket}/multipart-uploads/{uploadId}/parts/{n}: the
+        // one multipart call the orchestrator makes. Any upload id is accepted;
+        // failMetadataWith stands in for the session being absent or refusing.
+        int multipartAt = remainder.indexOf("/multipart-uploads/");
+        if (multipartAt >= 0 && "PUT".equals(exchange.getRequestMethod())) {
+            String bucket = remainder.substring(0, multipartAt);
+            String[] segments = remainder.substring(multipartAt + "/multipart-uploads/".length()).split("/");
+            if (segments.length != 3 || !segments[1].equals("parts")) {
+                respond(exchange, 404, new byte[0]);
+                return;
+            }
+            Map<String, Object> request = JSON.readValue(body, Map.class);
+            parts.put(bucket + "/" + segments[0] + "/" + segments[2], request);
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("partNumber", Integer.parseInt(segments[2]));
+            response.put("etag", request.get("contentHash"));
+            response.put("sizeBytes", request.get("sizeBytes"));
+            respondJson(exchange, 200, response);
+            return;
+        }
         boolean chunksRequest = remainder.contains("/object-chunks/");
         String separator = chunksRequest ? "/object-chunks/" : "/objects/";
         int separatorAt = remainder.indexOf(separator);
