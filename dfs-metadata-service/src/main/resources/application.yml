@@ -48,6 +48,17 @@ dfs:
     cache-ttl: 10m
     default-replication-factor: 3
     default-chunk-size-mb: 8
+    # Multipart upload sessions (ADR 12), owned by this service.
+    multipart:
+      # An upload left open this long lapses and is deleted by the sweep.
+      session-ttl: 24h
+      # Every part but the last must be at least this large, as in S3.
+      min-part-size: 5MB
+      # How often the sweep runs, and how many expired sessions it deletes per
+      # transaction. Several instances may sweep at once; they skip each other's
+      # locked rows rather than collide.
+      sweep-interval: 15m
+      sweep-batch-size: 500
 
 management:
   endpoints:
