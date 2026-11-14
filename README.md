@@ -82,6 +82,12 @@ chooses to leave behind is documented in
 - Objects split into fixed-size chunks, stored independently and reassembled in order; one chunk is in memory at a time, in either direction
 - The caller's own JWT is forwarded to both downstream services; there is no service account anywhere
 - Write ordering chosen so a partial failure never leaves an object that lists but cannot be downloaded
+- Chunks spread across several blob nodes by rendezvous hashing, with fallback to the next node and the node each chunk went to recorded, so reads never recompute placement
+
+**Multipart upload (S3-style)**
+- Sessions opened, listed, completed and aborted in the metadata service; only the parts' bytes travel through the orchestrator
+- Parts retried and replaced independently, up to 10,000 per upload; completion promotes them into an object in one transaction
+- Upload ids are tenant-scoped names, never capabilities; abandoned sessions expire and are swept
 
 ## Tech stack
 
@@ -178,6 +184,17 @@ curl -sX PUT localhost:8083/api/v1/buckets/photos/objects/hello.txt \
 # → 201 {"key":"hello.txt","versionId":"…","sizeBytes":11,"contentType":"text/plain",
 #        "contentHash":"bc62d4b8…4423","etag":"bc62d4b8…4423","userMetadata":{}}
 
+# Or upload in parts: open a session, send parts to the orchestrator, complete
+UPLOAD=$(curl -sX POST localhost:8082/api/v1/buckets/photos/multipart-uploads \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"key":"big.bin"}' | jq -r .uploadId)
+ETAG=$(curl -sX PUT localhost:8083/api/v1/buckets/photos/multipart-uploads/$UPLOAD/parts/1 \
+  -H "Authorization: Bearer $TOKEN" --data-binary @big.bin | jq -r .etag)
+curl -sX POST localhost:8082/api/v1/buckets/photos/multipart-uploads/$UPLOAD/complete \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"parts\":[{\"partNumber\":1,\"etag\":\"$ETAG\"}]}"
+# → 201 the object. Every part but the last must be at least 5 MiB.
+
 # Read it back — the bytes, with the digest as ETag
 curl -i localhost:8083/api/v1/buckets/photos/objects/hello.txt \
   -H "Authorization: Bearer $TOKEN"
@@ -257,7 +274,7 @@ mvn -pl dfs-metadata-service -am verify -Dit.test=BucketApiIT
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Auth, buckets, single-node object upload/download | ✅ Complete |
-| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path, chunking and multi-node placement done; multipart next |
+| **2** | gRPC, chunking, multipart upload, multi-node distribution | ✅ Complete |
 | **3** | Replication, GC and refcounting, presigned URLs, encryption | Planned |
 | **4** | Observability, benchmarking, admin ops, multi-tenant scale | Planned |
 

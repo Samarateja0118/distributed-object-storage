@@ -124,11 +124,11 @@ mvn clean verify -DargLine="-Dapi.version=1.44"
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Auth, buckets, single-node object upload/download | ✅ Complete |
-| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path, chunking and multi-node placement done; multipart ([ADR 12](docs/adr/0012-s3-style-multipart-upload.md)) next |
+| **2** | gRPC, chunking, multipart upload, multi-node distribution | ✅ Complete |
 | **3** | Replication, GC, blob refcounting, presigned URLs, encryption | Planned |
 | **4** | Observability, benchmarking, admin ops, multi-tenant scale | Planned |
 
-Phase 1 delivered the auth service, metadata service, blob node, and upload orchestrator, all covered by integration tests.
+Phase 1 delivered the auth service, metadata service, blob node, and upload orchestrator, all covered by integration tests. Phase 2 added the gRPC byte path, chunked objects, multi-node placement and multipart upload.
 
 Two scoping decisions hold unless the repository owner changes them:
 
@@ -136,6 +136,8 @@ Two scoping decisions hold unless the repository owner changes them:
 2. Auth is **login, JWT, and API keys — not full RBAC**. A `role` claim exists (OWNER/MEMBER) but nothing enforces per-bucket permissions.
 
 3. Chunk placement follows [ADR 11](docs/adr/0011-chunk-placement-is-recorded-not-recomputed.md). The orchestrator ranks the static node set in `dfs.upload.blob-nodes` per chunk digest with rendezvous hashing (`RendezvousPlacement`), writes to the first node that answers, and records that node in `object_chunks.node_id`; reads follow the record and never recompute it. Only a node that does not answer (`UNAVAILABLE`/`DEADLINE_EXCEEDED`) is skipped — a refusal fails the upload. A node id must never be renamed or dropped while chunks are recorded on it, and `blob-node-0` must stay because every pre-Phase-2 chunk is recorded there. One copy per chunk: distributed, not redundant, until Phase 3.
+
+4. Multipart upload follows [ADR 12](docs/adr/0012-s3-style-multipart-upload.md). Sessions live in the metadata service (`MultipartUploadService`, tables `multipart_uploads` and `multipart_upload_chunks`); the orchestrator carries only part bytes (`PUT /multipart-uploads/{id}/parts/{n}`). Every session lookup is by upload id **and** a bucket the token's tenant owns — never by id alone. Completion goes through `ObjectVersionWriter`, the same path as a single PUT, and deletes the session in the same transaction. Expired sessions are refused immediately and deleted by `MultipartExpirySweep` with `FOR UPDATE SKIP LOCKED`. Phase 3 GC must count `multipart_upload_chunks` as references, alongside `object_chunks`.
 
 An object is an ordered list of chunks, `dfs.upload.chunk-size` each. The orchestrator holds one chunk at a time in both directions, so `dfs.upload.max-object-size` is now a policy ceiling rather than a bound on heap. It is enforced against bytes as they are read — a `Content-Length` can be understated or omitted — so an oversized upload stores the chunks that fit before it is rejected. Nothing is registered, so the object never becomes visible, and the stray chunks are unreferenced bytes for GC.
 
