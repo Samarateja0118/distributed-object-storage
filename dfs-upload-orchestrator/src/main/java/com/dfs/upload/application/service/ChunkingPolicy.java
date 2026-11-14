@@ -1,11 +1,12 @@
 package com.dfs.upload.application.service;
 
 /**
- * How an object is cut into chunks, and where they go.
+ * How an object is cut into chunks.
  *
  * <p>Plain values rather than the configuration record itself, so the service
  * doing the chunking depends on the two numbers it needs and not on how the
- * process happens to be configured.
+ * process happens to be configured. Where each chunk goes is a separate concern,
+ * {@link com.dfs.upload.domain.placement.RendezvousPlacement}.
  *
  * @param chunkSizeBytes    size of every chunk but the last. Part of the
  *                          contract, not a free tuning knob: the same bytes cut
@@ -15,10 +16,6 @@ package com.dfs.upload.application.service;
  * @param maxObjectSizeBytes ceiling on a single upload. Once content is streamed
  *                          chunk by chunk this is a policy limit rather than the
  *                          heap bound it was in Phase 1.
- * @param nodeId            the blob node chunks are written to. Phase 2's first
- *                          chunking milestone runs one node; choosing among
- *                          several is ADR 11's job, and the recorded value is
- *                          what reads follow either way.
  */
-public record ChunkingPolicy(int chunkSizeBytes, long maxObjectSizeBytes, String nodeId) {
+public record ChunkingPolicy(int chunkSizeBytes, long maxObjectSizeBytes) {
 }

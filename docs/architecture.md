@@ -184,6 +184,12 @@ The asymmetry is deliberate and is the subject of
   public API as any other client, and the client-facing API stays REST
   ([ADR 10](adr/0010-grpc-for-the-byte-path.md)). The blob node still serves its
   REST endpoints, which retire once the gRPC path has proven itself.
+- **Placement, not replication.** Phase 2 spreads chunks across a static set of
+  blob nodes by rendezvous hashing, falls back to the next node when one does not
+  answer, and records the node each chunk went to; reads follow the record
+  ([ADR 11](adr/0011-chunk-placement-is-recorded-not-recomputed.md)). There is one
+  copy of each chunk, so losing a node's disk loses data until replication lands
+  in Phase 3.
 - **No RBAC.** Auth stops at login, JWT, and API keys. A `role` claim exists
   (`OWNER` / `MEMBER`) but no per-bucket permission is enforced.
 - **No chunking.** Each upload is buffered whole in memory, bounded by

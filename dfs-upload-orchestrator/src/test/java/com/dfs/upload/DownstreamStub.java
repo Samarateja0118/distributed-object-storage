@@ -15,7 +15,6 @@ import com.sun.net.httpserver.HttpServer;
 import io.grpc.Context;
 import io.grpc.Contexts;
 import io.grpc.Metadata;
-import io.grpc.Server;
 import io.grpc.ServerCall;
 import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
@@ -37,8 +36,13 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Stands in for the blob node and the metadata service, each on the transport it
+ * Stands in for the blob nodes and the metadata service, each on the transport it
  * really uses: gRPC for the byte path, HTTP for metadata.
+ *
+ * <p>Two blob nodes, {@link #NODE_IDS}, each a separate in-process gRPC server
+ * with its own storage, so placement and fallback are tested against the same
+ * per-node channels production builds. Every blob call is recorded with the node
+ * that received it.
  *
  * <p>Real servers rather than mocked clients on purpose: what these tests check
  * is the wire contract — the digest and frames the node receives, the forwarded
@@ -47,13 +51,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * were right.
  *
  * <p>Each half keeps enough state to behave like the real thing, so a round trip
- * can be tested end to end. {@link #failBlobWith} and {@link #failMetadataWith}
- * force the failure cases.
+ * can be tested end to end. {@link #failBlobWith}, {@link #failBlobNodeWith} and
+ * {@link #failMetadataWith} force the failure cases.
  */
 final class DownstreamStub {
 
+    /** The configured node set. The first is the id every pre-Phase-2 chunk is recorded on. */
+    static final List<String> NODE_IDS = List.of("blob-node-0", "blob-node-1");
+
     /** In-process: needs no port, and leaves nothing to clean up between runs. */
-    static final String BLOB_GRPC_NAME = "upload-blob-node-stub";
+    private static final String BLOB_GRPC_NAME_PREFIX = "upload-blob-node-stub-";
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -62,18 +69,18 @@ final class DownstreamStub {
     private static final Context.Key<String> CALLER_AUTHORIZATION = Context.key("stub-authorization");
 
     private final HttpServer metadataServer;
-    private final Server blobServer;
+
+    /** By node id, in {@link #NODE_IDS} order. */
+    private final Map<String, BlobNodeStub> blobNodes = new LinkedHashMap<>();
 
     private final List<BlobCall> blobCalls = Collections.synchronizedList(new ArrayList<>());
     private final List<RecordedRequest> metadataRequests = Collections.synchronizedList(new ArrayList<>());
 
-    private final Map<String, byte[]> blobs = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> objects = new ConcurrentHashMap<>();
 
     /** Chunk lists, keyed like {@link #objects} and served from their own path. */
     private final Map<String, List<Map<String, Object>>> objectChunks = new ConcurrentHashMap<>();
 
-    private volatile Status blobFailure;
     private volatile int metadataFailureStatus;
 
     DownstreamStub() {
@@ -82,11 +89,15 @@ final class DownstreamStub {
             metadataServer.createContext("/api/v1/buckets", this::handleMetadata);
             metadataServer.start();
 
-            blobServer = InProcessServerBuilder.forName(BLOB_GRPC_NAME)
-                    .addService(new BlobNodeStub())
-                    .intercept(recordAuthorization())
-                    .build()
-                    .start();
+            for (String nodeId : NODE_IDS) {
+                BlobNodeStub node = new BlobNodeStub(nodeId);
+                InProcessServerBuilder.forName(BLOB_GRPC_NAME_PREFIX + nodeId)
+                        .addService(node)
+                        .intercept(recordAuthorization())
+                        .build()
+                        .start();
+                blobNodes.put(nodeId, node);
+            }
         } catch (IOException e) {
             throw new IllegalStateException("Could not start the downstream stub", e);
         }
@@ -96,23 +107,31 @@ final class DownstreamStub {
         return "http://127.0.0.1:" + metadataServer.getAddress().getPort();
     }
 
-    String blobGrpcTarget() {
-        return "in-process:" + BLOB_GRPC_NAME;
+    String blobGrpcTarget(String nodeId) {
+        return "in-process:" + BLOB_GRPC_NAME_PREFIX + nodeId;
     }
 
     void reset() {
         blobCalls.clear();
         metadataRequests.clear();
-        blobs.clear();
+        blobNodes.values().forEach(BlobNodeStub::reset);
         objects.clear();
         objectChunks.clear();
-        blobFailure = null;
         metadataFailureStatus = 0;
     }
 
-    /** Fails every blob call with this status; {@code null} restores success. */
+    /** Fails every blob call on every node with this status; {@code null} restores success. */
     void failBlobWith(Status status) {
-        blobFailure = status;
+        blobNodes.values().forEach(node -> node.failure = status);
+    }
+
+    /**
+     * Fails every call to one node. {@link Status#UNAVAILABLE} is how a node that
+     * is down looks to the orchestrator; any other status is a node that answered
+     * and refused.
+     */
+    void failBlobNodeWith(String nodeId, Status status) {
+        node(nodeId).failure = status;
     }
 
     void failMetadataWith(int status) {
@@ -122,7 +141,22 @@ final class DownstreamStub {
     /** Pre-loads metadata pointing at a chunk the blob node does not have. */
     void registerDanglingObject(String bucket, String key, String digest) {
         objects.put(bucket + "/" + key, objectRecord(key, digest, 12, "text/plain", Map.of()));
-        objectChunks.put(bucket + "/" + key, List.of(chunkRecord(0, digest, 12)));
+        objectChunks.put(bucket + "/" + key, List.of(chunkRecord(0, digest, 12, NODE_IDS.getFirst())));
+    }
+
+    /**
+     * Pre-loads a one-chunk object recorded on {@code nodeId}, with its bytes
+     * stored there if that node exists in this stub. A node id outside
+     * {@link #NODE_IDS} stands for a node removed from the configuration.
+     */
+    void registerObjectOnNode(String bucket, String key, byte[] content, String nodeId) {
+        String digest = com.dfs.common.hash.Sha256.hexOfContent(content);
+        BlobNodeStub node = blobNodes.get(nodeId);
+        if (node != null) {
+            node.blobs.put(digest, content);
+        }
+        objects.put(bucket + "/" + key, objectRecord(key, digest, content.length, "text/plain", Map.of()));
+        objectChunks.put(bucket + "/" + key, List.of(chunkRecord(0, digest, content.length, nodeId)));
     }
 
     /**
@@ -130,9 +164,9 @@ final class DownstreamStub {
      * metadata API permits for records not written through the orchestrator.
      */
     void registerObjectWithoutContentType(String bucket, String key, String digest, byte[] content) {
-        blobs.put(digest, content);
+        node(NODE_IDS.getFirst()).blobs.put(digest, content);
         objects.put(bucket + "/" + key, objectRecord(key, digest, content.length, null, Map.of()));
-        objectChunks.put(bucket + "/" + key, List.of(chunkRecord(0, digest, content.length)));
+        objectChunks.put(bucket + "/" + key, List.of(chunkRecord(0, digest, content.length, NODE_IDS.getFirst())));
     }
 
     List<BlobCall> blobCalls() {
@@ -143,8 +177,21 @@ final class DownstreamStub {
         return List.copyOf(metadataRequests);
     }
 
+    /** Whether any node holds this digest. */
     boolean hasBlob(String digest) {
-        return blobs.containsKey(digest);
+        return blobNodes.values().stream().anyMatch(node -> node.blobs.containsKey(digest));
+    }
+
+    boolean hasBlobOn(String nodeId, String digest) {
+        return node(nodeId).blobs.containsKey(digest);
+    }
+
+    private BlobNodeStub node(String nodeId) {
+        BlobNodeStub node = blobNodes.get(nodeId);
+        if (node == null) {
+            throw new IllegalArgumentException("No stub blob node " + nodeId);
+        }
+        return node;
     }
 
     /**
@@ -152,6 +199,19 @@ final class DownstreamStub {
      * nothing else, and re-storing one is success rather than a conflict.
      */
     private final class BlobNodeStub extends BlobNodeServiceGrpc.BlobNodeServiceImplBase {
+
+        private final String nodeId;
+        private final Map<String, byte[]> blobs = new ConcurrentHashMap<>();
+        private volatile Status failure;
+
+        BlobNodeStub(String nodeId) {
+            this.nodeId = nodeId;
+        }
+
+        void reset() {
+            blobs.clear();
+            failure = null;
+        }
 
         @Override
         public StreamObserver<PutChunkRequest> putChunk(StreamObserver<PutChunkResponse> responses) {
@@ -178,11 +238,11 @@ final class DownstreamStub {
                 @Override
                 public void onCompleted() {
                     byte[] received = content.toByteArray();
-                    blobCalls.add(new BlobCall("PutChunk", digest, received, authorization));
+                    blobCalls.add(new BlobCall("PutChunk", digest, received, authorization, nodeId));
 
-                    Status failure = blobFailure;
-                    if (failure != null) {
-                        responses.onError(failure.withDescription("forced blob failure").asRuntimeException());
+                    Status forced = failure;
+                    if (forced != null) {
+                        responses.onError(forced.withDescription("forced blob failure").asRuntimeException());
                         return;
                     }
 
@@ -200,11 +260,11 @@ final class DownstreamStub {
         @Override
         public void getChunk(GetChunkRequest request, StreamObserver<GetChunkResponse> responses) {
             String digest = request.getContentHash();
-            blobCalls.add(new BlobCall("GetChunk", digest, new byte[0], CALLER_AUTHORIZATION.get()));
+            blobCalls.add(new BlobCall("GetChunk", digest, new byte[0], CALLER_AUTHORIZATION.get(), nodeId));
 
-            Status failure = blobFailure;
-            if (failure != null) {
-                responses.onError(failure.withDescription("forced blob failure").asRuntimeException());
+            Status forced = failure;
+            if (forced != null) {
+                responses.onError(forced.withDescription("forced blob failure").asRuntimeException());
                 return;
             }
 
@@ -220,7 +280,7 @@ final class DownstreamStub {
         @Override
         public void chunkExists(ChunkExistsRequest request, StreamObserver<ChunkExistsResponse> responses) {
             String digest = request.getContentHash();
-            blobCalls.add(new BlobCall("ChunkExists", digest, new byte[0], CALLER_AUTHORIZATION.get()));
+            blobCalls.add(new BlobCall("ChunkExists", digest, new byte[0], CALLER_AUTHORIZATION.get(), nodeId));
 
             byte[] content = blobs.get(digest);
             responses.onNext(ChunkExistsResponse.newBuilder()
@@ -327,12 +387,12 @@ final class DownstreamStub {
         return record;
     }
 
-    private static Map<String, Object> chunkRecord(int index, String digest, long sizeBytes) {
+    private static Map<String, Object> chunkRecord(int index, String digest, long sizeBytes, String nodeId) {
         Map<String, Object> record = new LinkedHashMap<>();
         record.put("index", index);
         record.put("digest", digest);
         record.put("sizeBytes", sizeBytes);
-        record.put("nodeId", "blob-node-0");
+        record.put("nodeId", nodeId);
         return record;
     }
 
@@ -352,10 +412,11 @@ final class DownstreamStub {
     }
 
     /**
-     * One call to the blob node. {@code content} is empty for the calls that
-     * carry none — the digest is what identifies those.
+     * One call to a blob node. {@code content} is empty for the calls that carry
+     * none — the digest is what identifies those. {@code nodeId} is the node that
+     * received the call.
      */
-    record BlobCall(String operation, String digest, byte[] content, String authorization) {
+    record BlobCall(String operation, String digest, byte[] content, String authorization, String nodeId) {
     }
 
     record RecordedRequest(String method, String path, Map<String, String> headers, byte[] body) {

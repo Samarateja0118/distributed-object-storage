@@ -36,8 +36,13 @@ jobs:
       # Testcontainers starts PostgreSQL itself; deploy/docker-compose.yml is for
       # running services by hand and is deliberately not used here. The runner's
       # preinstalled Docker daemon needs no configuration.
+      # api.version: the runner's Docker daemon now refuses API versions below
+      # 1.40, and the docker-java bundled with Testcontainers defaults to 1.32,
+      # so every Testcontainers IT fails before it starts. It must be a system
+      # property in the test JVMs (DOCKER_API_VERSION is ignored), which is the
+      # same fix CLAUDE.md documents for Colima.
       - name: Build and verify
-        run: mvn -B -ntp clean verify
+        run: mvn -B -ntp clean verify -DargLine="-Dapi.version=1.44"
 
       - name: Upload test reports
         if: failure()

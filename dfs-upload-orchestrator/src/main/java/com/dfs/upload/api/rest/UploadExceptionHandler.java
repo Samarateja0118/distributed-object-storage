@@ -1,5 +1,6 @@
 package com.dfs.upload.api.rest;
 
+import com.dfs.upload.domain.exception.BlobNodeNotConfiguredException;
 import com.dfs.upload.domain.exception.DownstreamServiceException;
 import com.dfs.upload.domain.exception.DownstreamUnavailableException;
 import com.dfs.upload.domain.exception.ObjectNotFoundException;
@@ -76,6 +77,21 @@ class UploadExceptionHandler {
         log.error("Downstream service unreachable", exception);
         return problem(HttpStatus.GATEWAY_TIMEOUT, "Upstream service unreachable",
                 "A storage service did not respond in time", "downstream-unreachable");
+    }
+
+    /**
+     * A chunk is recorded on a node this deployment has no address for. Neither
+     * a missing object (the bytes may well exist) nor a failing dependency
+     * (nothing was called): this service is misconfigured, so it says so as a
+     * 500 and logs the node id an operator needs. The id stays out of the
+     * response body, which a client has no use for.
+     */
+    @ExceptionHandler(BlobNodeNotConfiguredException.class)
+    ProblemDetail handleNodeNotConfigured(BlobNodeNotConfiguredException exception) {
+        log.error("Chunk recorded on unconfigured blob node {}", exception.nodeId(), exception);
+        return problem(HttpStatus.INTERNAL_SERVER_ERROR, "Storage node not configured",
+                "Part of this object is stored on a node this service is not configured to reach",
+                "node-not-configured");
     }
 
     private static ProblemDetail problem(HttpStatus status, String title, String detail, String type) {

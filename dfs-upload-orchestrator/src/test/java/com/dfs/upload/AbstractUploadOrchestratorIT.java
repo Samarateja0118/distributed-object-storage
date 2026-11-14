@@ -15,7 +15,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.UUID;
 
 /**
- * Boots the orchestrator against in-process stand-ins for the blob node and the
+ * Boots the orchestrator against in-process stand-ins for two blob nodes and the
  * metadata service.
  *
  * <p>The stub is started once for the whole suite rather than per class, for the
@@ -45,10 +45,15 @@ abstract class AbstractUploadOrchestratorIT {
 
     @DynamicPropertySource
     static void downstreamAddresses(DynamicPropertyRegistry registry) {
-        // The channel is configured from this property, so pointing it at the
-        // in-process stub exercises the wiring production uses rather than a
-        // channel assembled for the test.
-        registry.add("dfs.upload.blob-grpc-target", DOWNSTREAM::blobGrpcTarget);
+        // The per-node channels are built from this list, so pointing it at the
+        // in-process stubs exercises the wiring production uses rather than
+        // channels assembled for the test. Indexed properties replace the whole
+        // list from application.yml rather than merging with it.
+        for (int i = 0; i < DownstreamStub.NODE_IDS.size(); i++) {
+            String nodeId = DownstreamStub.NODE_IDS.get(i);
+            registry.add("dfs.upload.blob-nodes[%d].id".formatted(i), () -> nodeId);
+            registry.add("dfs.upload.blob-nodes[%d].target".formatted(i), () -> DOWNSTREAM.blobGrpcTarget(nodeId));
+        }
         registry.add("dfs.upload.metadata-base-url", DOWNSTREAM::metadataBaseUrl);
     }
 

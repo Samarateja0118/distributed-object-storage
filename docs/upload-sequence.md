@@ -148,7 +148,8 @@ All errors are RFC 7807 problem details.
 | Digest mismatch at the blob node | 502 | Blob node answers `INVALID_ARGUMENT`; the orchestrator reports it as a downstream failure, since the caller did nothing wrong |
 | Downstream rejects the token | 401 / 403 | Passed through — HTTP 401/403 from metadata, `UNAUTHENTICATED`/`PERMISSION_DENIED` from the blob node |
 | Other downstream error status | 502 | `DownstreamServiceException` |
-| Blob node or metadata unreachable | 504 | `ResourceAccessException` for REST, `UNAVAILABLE`/`DEADLINE_EXCEEDED` for gRPC — both become `DownstreamUnavailableException` |
+| A chunk's preferred blob node unreachable | — | Not a failure: the chunk is written to the next node in its rendezvous ranking and recorded there ([ADR 11](adr/0011-chunk-placement-is-recorded-not-recomputed.md)). Only `UNAVAILABLE`/`DEADLINE_EXCEEDED` fall through; a node that answers and refuses fails the upload |
+| Every blob node unreachable, or metadata unreachable | 504 | `ResourceAccessException` for REST, `UNAVAILABLE`/`DEADLINE_EXCEEDED` for gRPC — both become `DownstreamUnavailableException` |
 
 The bucket-does-not-exist case is worth noting: because the blob write happens
 first, a 404 from metadata means the bytes are already on disk with nothing

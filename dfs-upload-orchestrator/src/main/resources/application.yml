@@ -23,10 +23,10 @@ server:
 
 grpc:
   client:
-    blob-node:
-      # One address, declared once above: this block is the channel's, but the
-      # value belongs with the service's other downstream addresses.
-      address: ${dfs.upload.blob-grpc-target}
+    # Every blob node gets its own channel, blob-node-<id>, and these settings
+    # apply to all of them; one node can be tuned under grpc.client.blob-node-<id>.
+    # Addresses are not set here: each comes from its entry in dfs.upload.blob-nodes.
+    GLOBAL:
       # Internal cluster traffic, and nothing else here speaks TLS yet. The
       # starter would otherwise default to it and fail to connect.
       negotiation-type: plaintext
@@ -48,11 +48,15 @@ dfs:
     # through the same public API as any other client (ADR 10). The metadata
     # target below is scaffolding and is not read by anything yet.
     metadata-grpc-target: static://localhost:9082
-    blob-grpc-target: ${BLOB_GRPC_TARGET:static://localhost:9090}
     metadata-base-url: ${METADATA_SERVICE_URL:http://localhost:8082}
-    # The node chunks are written to, recorded against each chunk so reads follow
-    # where the bytes actually went (ADR 11). One node until placement arrives.
-    blob-node-id: ${BLOB_NODE_ID:blob-node-0}
+    # The static node set chunks are placed across by rendezvous hashing (ADR 11).
+    # The id is what is recorded against each chunk and what reads follow, so it
+    # must never be renamed or reused while chunks are recorded on it. Every chunk
+    # written before Phase 2 is recorded on blob-node-0, so that id must stay in
+    # the set. Adding a node is a redeploy; override the whole list to add one.
+    blob-nodes:
+      - id: ${BLOB_NODE_ID:blob-node-0}
+        target: ${BLOB_GRPC_TARGET:static://localhost:9090}
     # Content is streamed a chunk at a time, so this caps how large an object may
     # be rather than how much heap one request can take.
     max-object-size: 100MB

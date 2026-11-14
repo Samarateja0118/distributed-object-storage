@@ -78,7 +78,7 @@ The orchestrator treats it as distinct from a plain miss. A 404 from the blob
 node at this point is not the caller asking for something that never existed; it
 means the object is unreadable and the system is inconsistent:
 
-> Metadata references blob `{digest}` but the blob node does not have it
+> Metadata references blob `{digest}` on `{node}` but that node does not have it
 
 That surfaces to the client as a 404, and to the operator as a log line naming
 the digest. Nothing repairs it automatically — detection and repair are Phase 3
@@ -125,7 +125,8 @@ server's empty `HEAD` response cannot be asserted in a MockMvc test.
 | Metadata references a missing blob | 404 | The blob node answers `NOT_FOUND`; logged with the digest, because the halves have diverged |
 | Downstream rejects the token | 401 / 403 | Passed through — HTTP 401/403 from metadata, `UNAUTHENTICATED`/`PERMISSION_DENIED` from the blob node |
 | Other downstream error status | 502 | `DownstreamServiceException` |
-| Metadata or blob node unreachable | 504 | `ResourceAccessException` for REST, `UNAVAILABLE`/`DEADLINE_EXCEEDED` for gRPC |
+| Metadata, or the chunk's recorded blob node, unreachable | 504 | `ResourceAccessException` for REST, `UNAVAILABLE`/`DEADLINE_EXCEEDED` for gRPC. Reads do not fall back to another node: each chunk has one copy, on the node recorded for it |
+| A chunk is recorded on a node missing from the orchestrator's configuration | 500 | `BlobNodeNotConfiguredException`: a deployment error, logged with the node id. A node id must stay configured for as long as chunks are recorded on it |
 
 ## What Phase 1 does not do
 

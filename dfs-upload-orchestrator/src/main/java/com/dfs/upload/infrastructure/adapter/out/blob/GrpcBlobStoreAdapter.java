@@ -27,13 +27,15 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Talks to the blob node over gRPC.
+ * Talks to the blob nodes over gRPC, each through its own channel.
  *
  * <p>The transport is streaming in both directions, so neither side holds a whole
- * chunk in memory on the wire (ADR 10). Phase 2's first milestone still hands
- * this adapter a whole object as a byte array — one blob is one chunk until
- * chunking lands — so the framing here is what will carry chunks later rather
- * than something the orchestrator already exploits.
+ * chunk in memory on the wire (ADR 10).
+ *
+ * <p>This adapter does not choose nodes. It is told which node to call, by the
+ * placement ranking on a write and by the recorded node on a read (ADR 11), and
+ * reports a node that did not answer as {@link DownstreamUnavailableException} so
+ * the caller can decide whether to try another.
  *
  * <p>No credential of its own: every call carries the caller's token as
  * {@code Authorization} metadata, which is the same token the resource server
@@ -53,15 +55,11 @@ public class GrpcBlobStoreAdapter implements BlobStorePort {
      */
     private static final int FRAME_BYTES = 64 * 1024;
 
-    private final BlobNodeServiceGrpc.BlobNodeServiceStub asyncStub;
-    private final BlobNodeServiceGrpc.BlobNodeServiceBlockingStub blockingStub;
+    private final BlobNodeClients nodes;
     private final long deadlineMillis;
 
-    public GrpcBlobStoreAdapter(BlobNodeServiceGrpc.BlobNodeServiceStub blobNodeStub,
-                                BlobNodeServiceGrpc.BlobNodeServiceBlockingStub blobNodeBlockingStub,
-                                UploadProperties properties) {
-        this.asyncStub = blobNodeStub;
-        this.blockingStub = blobNodeBlockingStub;
+    public GrpcBlobStoreAdapter(BlobNodeClients nodes, UploadProperties properties) {
+        this.nodes = nodes;
         this.deadlineMillis = properties.downstreamTimeout().toMillis();
     }
 
@@ -75,7 +73,8 @@ public class GrpcBlobStoreAdapter implements BlobStorePort {
      * which the response never arrives.
      */
     @Override
-    public void store(String digest, byte[] content, CallerToken token) {
+    public void store(String nodeId, String digest, byte[] content, CallerToken token) {
+        BlobNodeServiceGrpc.BlobNodeServiceStub asyncStub = nodes.forNode(nodeId).async();
         CompletableFuture<PutChunkResponse> response = new CompletableFuture<>();
         StreamObserver<PutChunkRequest> frames = asyncStub
                 .withInterceptors(bearer(token))
@@ -100,11 +99,12 @@ public class GrpcBlobStoreAdapter implements BlobStorePort {
             // is on the response observer, which carries more than this does.
         }
 
-        await(response, digest);
+        await(response, nodeId, digest);
     }
 
     @Override
-    public byte[] fetch(String digest, CallerToken token) {
+    public byte[] fetch(String nodeId, String digest, CallerToken token) {
+        BlobNodeServiceGrpc.BlobNodeServiceBlockingStub blockingStub = nodes.forNode(nodeId).blocking();
         try {
             Iterator<GetChunkResponse> frames = blockingStub
                     .withInterceptors(bearer(token))
@@ -117,20 +117,21 @@ public class GrpcBlobStoreAdapter implements BlobStorePort {
             }
             return content.toByteArray();
         } catch (StatusRuntimeException e) {
-            throw translate(e, digest);
+            throw translate(e, nodeId, digest);
         }
     }
 
-    private void await(CompletableFuture<PutChunkResponse> response, String digest) {
+    private void await(CompletableFuture<PutChunkResponse> response, String nodeId, String digest) {
         try {
             response.get();
         } catch (ExecutionException e) {
             throw e.getCause() instanceof StatusRuntimeException status
-                    ? translate(status, digest)
+                    ? translate(status, nodeId, digest)
                     : new DownstreamServiceException(SERVICE_NAME, 502, String.valueOf(e.getCause()));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new DownstreamUnavailableException("Interrupted while storing blob " + digest, e);
+            throw new DownstreamUnavailableException(
+                    "Interrupted while storing blob %s on %s".formatted(digest, nodeId), e);
         }
     }
 
@@ -140,19 +141,20 @@ public class GrpcBlobStoreAdapter implements BlobStorePort {
      * distinguishes a rejected token from a broken dependency; they are a
      * classification, not a status the node actually sent.
      */
-    private RuntimeException translate(StatusRuntimeException failure, String digest) {
+    private RuntimeException translate(StatusRuntimeException failure, String nodeId, String digest) {
         Status.Code code = failure.getStatus().getCode();
         return switch (code) {
             // Metadata pointed at this digest, so a miss is not a bad request —
             // it means the two halves have diverged and the object is unreadable.
             case NOT_FOUND -> new ObjectNotFoundException(
-                    "Metadata references blob %s but the blob node does not have it".formatted(digest));
+                    "Metadata references blob %s on %s but that node does not have it".formatted(digest, nodeId));
             case UNAUTHENTICATED -> new DownstreamServiceException(SERVICE_NAME, 401, describe(failure));
             case PERMISSION_DENIED -> new DownstreamServiceException(SERVICE_NAME, 403, describe(failure));
             // The node never answered: nothing was refused, so this is not a
-            // failed request but an absent dependency.
+            // failed request but an absent dependency — and the only outcome a
+            // write may retry on another node.
             case UNAVAILABLE, DEADLINE_EXCEEDED -> new DownstreamUnavailableException(
-                    "The %s did not respond: %s".formatted(SERVICE_NAME, describe(failure)), failure);
+                    "The %s %s did not respond: %s".formatted(SERVICE_NAME, nodeId, describe(failure)), failure);
             default -> new DownstreamServiceException(SERVICE_NAME, 502, describe(failure));
         };
     }

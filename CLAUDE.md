@@ -124,7 +124,7 @@ mvn clean verify -DargLine="-Dapi.version=1.44"
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Auth, buckets, single-node object upload/download | ✅ Complete |
-| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path and chunking done |
+| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path, chunking and multi-node placement done; multipart ([ADR 12](docs/adr/0012-s3-style-multipart-upload.md)) next |
 | **3** | Replication, GC, blob refcounting, presigned URLs, encryption | Planned |
 | **4** | Observability, benchmarking, admin ops, multi-tenant scale | Planned |
 
@@ -135,7 +135,7 @@ Two scoping decisions hold unless the repository owner changes them:
 1. gRPC carries the **byte path only** — the orchestrator's calls to the blob node. The metadata service and the client-facing API stay REST ([ADR 10](docs/adr/0010-grpc-for-the-byte-path.md)), and `metadataGrpcTarget` remains unused scaffolding. The blob node's REST endpoints also stay until the gRPC path has proven itself; `ObjectLifecycleE2EIT.refusesUnauthenticatedBlobReads` is coupled to them and needs a gRPC equivalent when they go.
 2. Auth is **login, JWT, and API keys — not full RBAC**. A `role` claim exists (OWNER/MEMBER) but nothing enforces per-bucket permissions.
 
-3. Chunk placement is **not yet a decision**. Every chunk is written to the single node named by `dfs.upload.blob-node-id`, and the value is recorded per chunk so reads follow it. Choosing among several nodes is [ADR 11](docs/adr/0011-chunk-placement-is-recorded-not-recomputed.md), still to come.
+3. Chunk placement follows [ADR 11](docs/adr/0011-chunk-placement-is-recorded-not-recomputed.md). The orchestrator ranks the static node set in `dfs.upload.blob-nodes` per chunk digest with rendezvous hashing (`RendezvousPlacement`), writes to the first node that answers, and records that node in `object_chunks.node_id`; reads follow the record and never recompute it. Only a node that does not answer (`UNAVAILABLE`/`DEADLINE_EXCEEDED`) is skipped — a refusal fails the upload. A node id must never be renamed or dropped while chunks are recorded on it, and `blob-node-0` must stay because every pre-Phase-2 chunk is recorded there. One copy per chunk: distributed, not redundant, until Phase 3.
 
 An object is an ordered list of chunks, `dfs.upload.chunk-size` each. The orchestrator holds one chunk at a time in both directions, so `dfs.upload.max-object-size` is now a policy ceiling rather than a bound on heap. It is enforced against bytes as they are read — a `Content-Length` can be understated or omitted — so an oversized upload stores the chunks that fit before it is rejected. Nothing is registered, so the object never becomes visible, and the stray chunks are unreferenced bytes for GC.
 

@@ -131,6 +131,23 @@ below. If a port is already taken, override it — `SERVER_PORT=18082` — and t
 the orchestrator where to look with `METADATA_SERVICE_URL` or, for the blob
 node's gRPC port (`GRPC_PORT`, 9090 by default), `BLOB_GRPC_TARGET`.
 
+That runs one blob node. To spread chunks across several, start each with its
+own `SERVER_PORT`, `GRPC_PORT` and `BLOB_STORAGE_PATH`, and list them all in the
+orchestrator's `dfs.upload.blob-nodes`:
+
+```yaml
+dfs:
+  upload:
+    blob-nodes:
+      - id: blob-node-0          # must stay: chunks written before Phase 2 are recorded on it
+        target: static://localhost:9090
+      - id: blob-node-1
+        target: static://localhost:9091
+```
+
+A node's id is what each chunk is recorded against, so never rename or reuse one
+while chunks are recorded on it.
+
 ```bash
 # Register a tenant
 curl -sX POST localhost:8081/api/v1/tenants \
@@ -240,14 +257,14 @@ mvn -pl dfs-metadata-service -am verify -Dit.test=BucketApiIT
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Auth, buckets, single-node object upload/download | ✅ Complete |
-| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path and chunking done |
+| **2** | gRPC, chunking, multipart upload, multi-node distribution | In progress — gRPC byte path, chunking and multi-node placement done; multipart next |
 | **3** | Replication, GC and refcounting, presigned URLs, encryption | Planned |
 | **4** | Observability, benchmarking, admin ops, multi-tenant scale | Planned |
 
-Two current limits are deliberate rather than unfinished: every chunk goes to a
-single blob node, because choosing among several is a placement decision still to
-come, and auth stops at login, JWT, and API keys — a `role` claim exists, but no
-per-bucket RBAC is enforced.
+Two current limits are deliberate rather than unfinished: chunks are spread
+across blob nodes but each is stored once, so multi-node means distributed rather
+than redundant until replication in Phase 3; and auth stops at login, JWT, and API
+keys — a `role` claim exists, but no per-bucket RBAC is enforced.
 
 One behaviour is worth calling out, because it is the kind that fails quietly.
 An object is stored as an ordered list of chunks, and its `contentHash` is the
