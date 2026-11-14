@@ -5,11 +5,13 @@ import com.dfs.upload.application.port.in.ObjectTransferUseCase;
 import com.dfs.upload.application.port.out.BlobStorePort;
 import com.dfs.upload.application.port.out.MetadataRegistryPort;
 import com.dfs.upload.domain.exception.DownstreamUnavailableException;
+import com.dfs.upload.domain.exception.InvalidPartException;
 import com.dfs.upload.domain.exception.ObjectTooLargeException;
 import com.dfs.upload.domain.model.CallerToken;
 import com.dfs.upload.domain.model.ObjectChunkRef;
 import com.dfs.upload.domain.model.ObjectDownload;
 import com.dfs.upload.domain.model.RegisteredObject;
+import com.dfs.upload.domain.model.UploadedPart;
 import com.dfs.upload.domain.placement.RendezvousPlacement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,33 +87,9 @@ public class ObjectTransferService implements ObjectTransferUseCase {
      */
     @Override
     public RegisteredObject upload(UploadCommand command) {
-        List<ObjectChunkRef> chunks = new ArrayList<>();
-        long totalBytes = 0;
-
-        try (InputStream content = command.content()) {
-            byte[] buffer = new byte[chunking.chunkSizeBytes()];
-            int index = 0;
-            int filled;
-
-            // readNBytes rather than read: a short read is ordinary on a socket,
-            // and filling the buffer is what keeps chunk boundaries a function of
-            // the configured size rather than of how the bytes happened to arrive.
-            // Identical content has to chunk identically, or deduplication and the
-            // composite digest both come apart.
-            while ((filled = content.readNBytes(buffer, 0, buffer.length)) > 0) {
-                totalBytes += filled;
-                if (totalBytes > chunking.maxObjectSizeBytes()) {
-                    throw new ObjectTooLargeException(chunking.maxObjectSizeBytes());
-                }
-
-                byte[] chunk = filled == buffer.length ? buffer.clone() : Arrays.copyOf(buffer, filled);
-                String digest = Sha256.hexOfContent(chunk);
-                String nodeId = storeOnFirstAvailableNode(digest, chunk, command.token());
-                chunks.add(new ObjectChunkRef(index++, digest, filled, nodeId));
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed while reading the object's content", e);
-        }
+        StoredContent stored = storeContent(command.content(), command.token());
+        List<ObjectChunkRef> chunks = stored.chunks();
+        long totalBytes = stored.totalBytes();
 
         String contentHash = Sha256.composite(chunks.stream().map(ObjectChunkRef::digest).toList());
         log.debug("Stored {} chunk(s) totalling {} bytes for {}/{} as {}",
@@ -131,6 +109,92 @@ public class ObjectTransferService implements ObjectTransferUseCase {
                 command.bucketName(), command.objectKey(), registered.versionId(),
                 registered.sizeBytes(), chunks.size(), contentHash);
         return registered;
+    }
+
+    /**
+     * Stores one part's bytes chunk by chunk, then registers the part with its
+     * session in the metadata service.
+     *
+     * <p>The same order as a whole upload, for the same reason (ADR 6): the
+     * chunks are written before the session hears of them, so a failed
+     * registration — an expired session, another tenant's upload id — leaves
+     * only unreferenced bytes, never a part that claims content it does not
+     * have. The session is not checked first: that would cost a round trip on
+     * every part to fail faster on the rare request that is going to fail
+     * anyway, and the registration is where the check has to happen regardless.
+     *
+     * <p>The part is chunked independently of every other part, so its last
+     * chunk may be short and its boundaries become chunk boundaries in the
+     * finished object (ADR 12). Each request is held to the same size ceiling as
+     * a single upload; the finished object may be larger.
+     */
+    @Override
+    public UploadedPart uploadPart(UploadPartCommand command) {
+        StoredContent stored = storeContent(command.content(), command.token());
+        if (stored.chunks().isEmpty()) {
+            // The metadata service would refuse it too — a part exists only as
+            // its chunks — but nothing was written, so there is no reason to ask.
+            throw new InvalidPartException("A part must contain at least one byte");
+        }
+
+        String etag = Sha256.composite(stored.chunks().stream().map(ObjectChunkRef::digest).toList());
+        UploadedPart part = metadata.registerPart(new MetadataRegistryPort.RegisterPartCommand(
+                command.bucketName(),
+                command.uploadId(),
+                command.partNumber(),
+                stored.totalBytes(),
+                etag,
+                stored.chunks()),
+                command.token());
+
+        log.info("Uploaded part {} of upload {} in {} ({} bytes, {} chunk(s), etag {})",
+                part.partNumber(), command.uploadId(), command.bucketName(),
+                part.sizeBytes(), stored.chunks().size(), part.etag());
+        return part;
+    }
+
+    /**
+     * Reads content to its end, cutting it into chunks of the configured size
+     * and writing each to its placed node as it goes. One chunk is in memory at
+     * a time (ADR 8).
+     *
+     * <p>The size limit is enforced against the bytes actually read, because a
+     * Content-Length can be understated or omitted; so an oversized request has
+     * stored the chunks that fit before it is refused. Nothing registers them,
+     * which leaves them unreferenced bytes for GC — the failure ADR 6 accepts.
+     */
+    private StoredContent storeContent(InputStream input, CallerToken token) {
+        List<ObjectChunkRef> chunks = new ArrayList<>();
+        long totalBytes = 0;
+
+        try (InputStream content = input) {
+            byte[] buffer = new byte[chunking.chunkSizeBytes()];
+            int index = 0;
+            int filled;
+
+            // readNBytes rather than read: a short read is ordinary on a socket,
+            // and filling the buffer is what keeps chunk boundaries a function of
+            // the configured size rather than of how the bytes happened to arrive.
+            // Identical content has to chunk identically, or deduplication and the
+            // composite digest both come apart.
+            while ((filled = content.readNBytes(buffer, 0, buffer.length)) > 0) {
+                totalBytes += filled;
+                if (totalBytes > chunking.maxObjectSizeBytes()) {
+                    throw new ObjectTooLargeException(chunking.maxObjectSizeBytes());
+                }
+
+                byte[] chunk = filled == buffer.length ? buffer.clone() : Arrays.copyOf(buffer, filled);
+                String digest = Sha256.hexOfContent(chunk);
+                String nodeId = storeOnFirstAvailableNode(digest, chunk, token);
+                chunks.add(new ObjectChunkRef(index++, digest, filled, nodeId));
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed while reading the content", e);
+        }
+        return new StoredContent(List.copyOf(chunks), totalBytes);
+    }
+
+    private record StoredContent(List<ObjectChunkRef> chunks, long totalBytes) {
     }
 
     /**
