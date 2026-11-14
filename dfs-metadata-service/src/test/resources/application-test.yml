@@ -17,6 +17,12 @@ dfs:
     jwt:
       issuer: dfs-auth-test
       signing-secret: test-signing-secret-not-used-outside-tests
+  metadata:
+    multipart:
+      # Long enough that the scheduled sweep never runs during a test: the
+      # expiry tests call it directly against a clock they control, and a
+      # background run would race them.
+      sweep-interval: 1h
 
 logging:
   level:

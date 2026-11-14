@@ -1,10 +1,12 @@
 package com.dfs.upload.api.rest;
 
 import com.dfs.upload.api.rest.dto.UploadedObjectResponse;
+import com.dfs.upload.api.rest.dto.UploadedPartResponse;
 import com.dfs.upload.application.port.in.ObjectTransferUseCase;
 import com.dfs.upload.domain.model.CallerToken;
 import com.dfs.upload.domain.model.ObjectDownload;
 import com.dfs.upload.domain.model.RegisteredObject;
+import com.dfs.upload.domain.model.UploadedPart;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.Resource;
@@ -25,6 +27,7 @@ import java.io.InputStream;
 import java.util.LinkedHashMap;
 import java.util.Collections;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * The data plane: bytes in, bytes out.
@@ -72,6 +75,31 @@ public class ObjectContentController {
                 .eTag("\"" + registered.etag() + "\"")
                 .header("X-Object-Version-Id", registered.versionId().toString())
                 .body(UploadedObjectResponse.from(registered));
+    }
+
+    /**
+     * One part of a multipart upload: the bytes in, the part's etag out (ADR 12).
+     *
+     * <p>The rest of the session — opening it, listing parts, completing,
+     * aborting — is the metadata service's, because none of it carries bytes.
+     * This is the only multipart call that does, so it is the only one here.
+     * The part number is checked by the metadata service, which owns the rule;
+     * a number outside the range is refused as a 400 after the bytes are stored.
+     */
+    @PutMapping("/multipart-uploads/{uploadId}/parts/{partNumber}")
+    public ResponseEntity<UploadedPartResponse> uploadPart(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable String bucketName,
+            @PathVariable UUID uploadId,
+            @PathVariable int partNumber,
+            InputStream body) {
+
+        UploadedPart part = objects.uploadPart(new ObjectTransferUseCase.UploadPartCommand(
+                bucketName, uploadId, partNumber, body, callerToken(jwt)));
+
+        return ResponseEntity.ok()
+                .eTag("\"" + part.etag() + "\"")
+                .body(UploadedPartResponse.from(part));
     }
 
     /**

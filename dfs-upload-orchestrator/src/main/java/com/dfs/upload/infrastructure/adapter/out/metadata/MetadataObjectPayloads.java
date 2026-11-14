@@ -2,6 +2,7 @@ package com.dfs.upload.infrastructure.adapter.out.metadata;
 
 import com.dfs.upload.domain.model.ObjectChunkRef;
 import com.dfs.upload.domain.model.RegisteredObject;
+import com.dfs.upload.domain.model.UploadedPart;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.util.List;
@@ -9,7 +10,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * The wire shape of the metadata service's object API.
+ * The wire shape of the metadata service's object and multipart APIs.
  *
  * <p>Kept separate from {@link RegisteredObject} so that service's REST contract
  * can gain fields without those fields leaking into this one's domain.
@@ -25,6 +26,17 @@ final class MetadataObjectPayloads {
             String contentHash,
             List<ChunkPayload> chunks,
             Map<String, String> userMetadata) {
+    }
+
+    record PutPartRequest(long sizeBytes, String contentHash, List<ChunkPayload> chunks) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record PartResponse(int partNumber, String etag, long sizeBytes) {
+
+        UploadedPart toDomain() {
+            return new UploadedPart(partNumber, etag, sizeBytes);
+        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

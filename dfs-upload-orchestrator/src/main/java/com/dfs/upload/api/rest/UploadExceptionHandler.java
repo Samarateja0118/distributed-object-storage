@@ -3,8 +3,10 @@ package com.dfs.upload.api.rest;
 import com.dfs.upload.domain.exception.BlobNodeNotConfiguredException;
 import com.dfs.upload.domain.exception.DownstreamServiceException;
 import com.dfs.upload.domain.exception.DownstreamUnavailableException;
+import com.dfs.upload.domain.exception.InvalidPartException;
 import com.dfs.upload.domain.exception.ObjectNotFoundException;
 import com.dfs.upload.domain.exception.ObjectTooLargeException;
+import com.dfs.upload.domain.exception.UploadNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
@@ -35,6 +37,16 @@ class UploadExceptionHandler {
     @ExceptionHandler(ObjectNotFoundException.class)
     ProblemDetail handleNotFound(ObjectNotFoundException exception) {
         return problem(HttpStatus.NOT_FOUND, "Object not found", exception.getMessage(), "not-found");
+    }
+
+    @ExceptionHandler(UploadNotFoundException.class)
+    ProblemDetail handleUploadNotFound(UploadNotFoundException exception) {
+        return problem(HttpStatus.NOT_FOUND, "Upload not found", exception.getMessage(), "upload-not-found");
+    }
+
+    @ExceptionHandler(InvalidPartException.class)
+    ProblemDetail handleInvalidPart(InvalidPartException exception) {
+        return problem(HttpStatus.BAD_REQUEST, "Invalid part", exception.getMessage(), "invalid-part");
     }
 
     @ExceptionHandler(ObjectTooLargeException.class)

@@ -7,6 +7,8 @@ Generated from the Flyway migrations, which own the schema — `ddl-auto` stays
 |---|---|
 | `dfs-auth-service/src/main/resources/db/migration/V1__create_tenants_users_and_api_keys.sql` | `dfs_auth` |
 | `dfs-metadata-service/src/main/resources/db/migration/V1__create_bucket_and_object_metadata.sql` | `dfs_metadata` |
+| `dfs-metadata-service/src/main/resources/db/migration/V2__create_object_chunks.sql` | `dfs_metadata` |
+| `dfs-metadata-service/src/main/resources/db/migration/V3__create_multipart_uploads.sql` | `dfs_metadata` |
 
 The two live in **separate databases**, so no foreign key crosses between them.
 That is the point — see [architecture](architecture.md#persistence).
@@ -58,6 +60,9 @@ erDiagram
 ```mermaid
 erDiagram
     BUCKETS ||--o{ OBJECTS : "contains"
+    OBJECTS ||--o{ OBJECT_CHUNKS : "is made of"
+    BUCKETS ||--o{ MULTIPART_UPLOADS : "holds open"
+    MULTIPART_UPLOADS ||--o{ MULTIPART_UPLOAD_CHUNKS : "stages"
 
     BUCKETS {
         uuid id PK
@@ -85,7 +90,41 @@ erDiagram
         timestamptz updated_at
         timestamptz deleted_at "null when live"
     }
+
+    OBJECT_CHUNKS {
+        uuid object_id PK,FK "cascade on delete"
+        int chunk_index PK "from 0, no gaps"
+        varchar_64 chunk_digest "names the bytes on a blob node"
+        bigint size_bytes
+        varchar_64 node_id "where it was written; reads follow it (ADR 11)"
+    }
+
+    MULTIPART_UPLOADS {
+        uuid id PK "the upload id: a name, not a capability"
+        uuid bucket_id FK "the only route to a tenant"
+        varchar_1024 object_key "fixed when the session opens"
+        varchar_255 content_type
+        jsonb user_metadata
+        timestamptz created_at
+        timestamptz expires_at "refused from here; swept after"
+    }
+
+    MULTIPART_UPLOAD_CHUNKS {
+        uuid upload_id PK,FK "cascade on delete"
+        int part_number PK "1 to 10000"
+        int chunk_index PK "from 0 within the part"
+        varchar_64 chunk_digest
+        bigint size_bytes
+        varchar_64 node_id "copied to object_chunks on completion"
+    }
 ```
+
+A multipart session is the one thing here that is not a durable fact (ADR 12).
+Completing, aborting or expiring it deletes its `multipart_uploads` row, and the
+cascade takes its staged chunks; on completion the chunks it kept are already in
+`object_chunks`, in the same transaction. Both chunk tables are indexed by digest,
+because GC in Phase 3 must count a chunk staged in an open session as referenced
+before it reclaims any bytes.
 
 ## The join that is not a foreign key
 

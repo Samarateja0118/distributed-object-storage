@@ -136,6 +136,55 @@ having already written the blob, which lands in the orphaned-bytes case above.
 
 See [ADR 7](adr/0007-forward-the-callers-token.md).
 
+## Multipart upload
+
+For an object too large to send safely in one request, a client opens a session
+with the metadata service, sends each part's bytes through the orchestrator, and
+completes the session once every part is in ([ADR 12](adr/0012-s3-style-multipart-upload.md)).
+Only the parts carry bytes, so only the parts go through the orchestrator.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant M as Metadata service
+    participant O as Upload orchestrator
+    participant B as Blob nodes
+
+    C->>M: POST /buckets/{b}/multipart-uploads {key, contentType}
+    M-->>C: 201 {uploadId, expiresAt}
+    loop each part, in any order, retried freely
+        C->>O: PUT /buckets/{b}/multipart-uploads/{id}/parts/{n} (bytes)
+        O->>B: PutChunk for each chunk of the part (placed, ADR 11)
+        O->>M: PUT .../parts/{n} {sizeBytes, contentHash, chunks}
+        M-->>O: 200 {partNumber, etag}
+        O-->>C: 200 {partNumber, etag}
+    end
+    C->>M: POST .../{id}/complete {parts: [{partNumber, etag}]}
+    M->>M: check parts, write object + object_chunks, delete session (one tx)
+    M-->>C: 201 object
+```
+
+- **Each part is one request,** chunked and placed exactly like a single upload,
+  and held to the same `max-object-size` ceiling. The finished object may be
+  larger than that; that is the point.
+- **Blob-first still holds per part.** The chunks are written before the session
+  hears of them, so a part sent to a session that is not open — completed,
+  aborted, expired, or another tenant's — leaves unreferenced bytes and a 404.
+- **Re-uploading a part number replaces it.** Completion names each part by the
+  etag its upload returned, so a part replaced after the client last looked is
+  refused rather than silently used.
+- **Completion follows S3's rules:** at least one part, ascending part numbers
+  (gaps allowed), every part but the last at least 5 MiB. The object's chunk list
+  is the parts' lists end to end, so its `contentHash` is the composite of every
+  chunk in order — and the client's choice of part sizes is part of the object's
+  identity.
+- **The session is tenant-scoped.** An upload id reaches nothing without a token
+  for the tenant that opened it.
+- **Abandoned sessions expire** after `dfs.metadata.multipart.session-ttl` (24h).
+  They are refused from that moment, and a sweep deletes them in batches, turning
+  their staged chunks into ordinary orphans for GC.
+
 ## Failure responses
 
 All errors are RFC 7807 problem details.

@@ -3,7 +3,9 @@ package com.dfs.metadata.api.rest;
 import com.dfs.metadata.domain.exception.BucketAlreadyExistsException;
 import com.dfs.metadata.domain.exception.BucketNotEmptyException;
 import com.dfs.metadata.domain.exception.BucketNotFoundException;
+import com.dfs.metadata.domain.exception.InvalidPartException;
 import com.dfs.metadata.domain.exception.MetadataValidationException;
+import com.dfs.metadata.domain.exception.MultipartUploadNotFoundException;
 import com.dfs.metadata.domain.exception.ObjectNotFoundException;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -32,7 +34,8 @@ class MetadataExceptionHandler {
 
     private static final String PROBLEM_BASE = "https://docs.dfs.local/problems/";
 
-    @ExceptionHandler({BucketNotFoundException.class, ObjectNotFoundException.class})
+    @ExceptionHandler({BucketNotFoundException.class, ObjectNotFoundException.class,
+            MultipartUploadNotFoundException.class})
     ProblemDetail handleNotFound(RuntimeException exception) {
         return problem(HttpStatus.NOT_FOUND, "Resource not found", exception.getMessage(), "not-found");
     }
@@ -45,6 +48,16 @@ class MetadataExceptionHandler {
     @ExceptionHandler(BucketNotEmptyException.class)
     ProblemDetail handleBucketNotEmpty(BucketNotEmptyException exception) {
         return problem(HttpStatus.CONFLICT, "Bucket not empty", exception.getMessage(), "bucket-not-empty");
+    }
+
+    /**
+     * More specific than the validation handler below, which Spring resolves by
+     * exception type, so a bad part list gets its own problem type a client can
+     * act on.
+     */
+    @ExceptionHandler(InvalidPartException.class)
+    ProblemDetail handleInvalidPart(InvalidPartException exception) {
+        return problem(HttpStatus.BAD_REQUEST, "Invalid part", exception.getMessage(), "invalid-part");
     }
 
     @ExceptionHandler(MetadataValidationException.class)

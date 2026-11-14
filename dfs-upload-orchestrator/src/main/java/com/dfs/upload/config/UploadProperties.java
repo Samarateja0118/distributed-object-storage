@@ -19,9 +19,11 @@ import java.util.List;
  *                          bytes cut at a different size produce a different
  *                          composite digest, so changing this changes the
  *                          identity of every object written afterwards (ADR 9).
- * @param maxObjectSize     Ceiling on a single upload. Content is streamed a
- *                          chunk at a time, so this caps how large an object may
- *                          be rather than how much heap one request can take.
+ * @param maxObjectSize     Ceiling on the bytes in one request: a single upload,
+ *                          or one part of a multipart upload. Content is streamed
+ *                          a chunk at a time, so this caps a request rather than
+ *                          heap. A multipart object may exceed it, which is what
+ *                          multipart is for (ADR 12).
  * @param downstreamTimeout Applied to both downstream calls — a read timeout on
  *                          the REST client, a deadline on the gRPC one — so a
  *                          hung dependency fails the request rather than pinning
@@ -31,7 +33,6 @@ import java.util.List;
 public record UploadProperties(
         DataSize chunkSize,
         int maxConcurrentChunks,
-        Duration multipartSessionTtl,
         String metadataGrpcTarget,
         List<BlobNode> blobNodes,
         String metadataBaseUrl,

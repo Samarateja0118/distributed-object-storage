@@ -19,7 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -29,16 +28,19 @@ public class ObjectMetadataService implements ObjectMetadataUseCase {
     private final ObjectMetadataRepositoryPort objectRepository;
     private final ObjectChunkRepositoryPort chunkRepository;
     private final BucketRepositoryPort bucketRepository;
+    private final ObjectVersionWriter versionWriter;
     private final Clock clock;
 
     public ObjectMetadataService(
             ObjectMetadataRepositoryPort objectRepository,
             ObjectChunkRepositoryPort chunkRepository,
             BucketRepositoryPort bucketRepository,
+            ObjectVersionWriter versionWriter,
             Clock clock) {
         this.objectRepository = objectRepository;
         this.chunkRepository = chunkRepository;
         this.bucketRepository = bucketRepository;
+        this.versionWriter = versionWriter;
         this.clock = clock;
     }
 
@@ -58,37 +60,8 @@ public class ObjectMetadataService implements ObjectMetadataUseCase {
         ContentHash hash = new ContentHash(command.contentHash());
         ObjectChunks chunks = new ObjectChunks(command.chunks());
         chunks.requireConsistentWith(hash, command.sizeBytes());
-        Instant now = Instant.now(clock);
-
-        Optional<StorageObject> current = objectRepository.findCurrentVersion(bucket.id(), key);
-        if (current.isEmpty()) {
-            return saveWithChunks(StorageObject.create(
-                    bucket.id(), key, command.sizeBytes(), command.contentType(), hash,
-                    command.userMetadata(), now), chunks);
-        }
-
-        StorageObject existing = current.get();
-        if (!bucket.versioningEnabled()) {
-            return saveWithChunks(existing.replaceContent(
-                    command.sizeBytes(), command.contentType(), hash, command.userMetadata(), now), chunks);
-        }
-
-        // The unique index permits only one current version per key, so the
-        // predecessor must be demoted before the new version is inserted.
-        objectRepository.demoteCurrentVersion(bucket.id(), key);
-        return saveWithChunks(StorageObject.create(
-                bucket.id(), key, command.sizeBytes(), command.contentType(), hash,
-                command.userMetadata(), now), chunks);
-    }
-
-    /**
-     * Both writes share the caller's transaction, so an object never becomes
-     * visible without the chunk list saying where its content is.
-     */
-    private StorageObject saveWithChunks(StorageObject object, ObjectChunks chunks) {
-        StorageObject saved = objectRepository.save(object);
-        chunkRepository.replaceChunks(saved.id(), chunks);
-        return saved;
+        return versionWriter.write(bucket, key, command.sizeBytes(), command.contentType(), hash,
+                command.userMetadata(), chunks, Instant.now(clock));
     }
 
     @Override

@@ -57,3 +57,17 @@ random string that looks like a secret.
 
 The cost is a second lifecycle to manage — sessions that can be open, completed,
 aborted, or expired — in a service that until now stored only durable facts.
+
+**A staged chunk is a reference.** Until a session ends, its chunks are named by
+`multipart_upload_chunks` and by nothing else. GC must count those rows alongside
+`object_chunks` before reclaiming bytes, or it would delete a part from under an
+upload about to complete.
+
+**An empty part is refused.** A part exists only as its chunk rows, so a part
+with no bytes could not be recorded; S3 tolerates a zero-byte last part, and this
+does not.
+
+**`max-object-size` now caps a request, not an object.** Each part is held to it,
+as a single upload is, but a completed object may exceed it by any multiple —
+which is what multipart is for. Before this, the property read as an object
+limit.
