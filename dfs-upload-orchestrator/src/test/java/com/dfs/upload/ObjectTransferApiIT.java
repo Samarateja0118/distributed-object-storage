@@ -139,7 +139,8 @@ class ObjectTransferApiIT extends AbstractUploadOrchestratorIT {
         for (int i = 0; i < chunks.size(); i++) {
             assertThat(chunks.get(i)).containsEntry("index", i);
             assertThat(chunks.get(i)).containsEntry("digest", puts.get(i).digest());
-            assertThat(chunks.get(i)).containsEntry("nodeId", "blob-node-0");
+            // Where it was actually written, which is what reads will follow.
+            assertThat(chunks.get(i)).containsEntry("nodeId", puts.get(i).nodeId());
         }
         assertThat(registered).containsEntry("contentHash",
                 Sha256.composite(puts.stream().map(DownstreamStub.BlobCall::digest).toList()));
